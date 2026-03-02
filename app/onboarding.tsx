@@ -142,7 +142,7 @@ export default function OnboardingScreen() {
                   <View style={styles.nameStepImageWrap}>
                     <Image source={config.image} style={styles.nameStepImage} resizeMode="contain" />
                   </View>
-                  <Text style={styles.title}>Name your{'\n'}{config.name}</Text>
+                  <Text style={styles.title}>Name your pet</Text>
                   <Text style={styles.nameSubtitle}>Give your new friend a special name</Text>
                 </View>
 
