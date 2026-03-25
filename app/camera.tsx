@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Image,
   Animated,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,15 +16,65 @@ import * as Haptics from 'expo-haptics';
 import { Camera, ImagePlus, X, Check, Sparkles } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
+import { PET_CONFIGS } from '@/constants/pets';
+import { formatNutrientName, getNutrientEmoji } from '@/constants/badges';
+import { rollPhotoRating } from '@/lib/photo-rating';
+import { analyzePhoto } from '@/lib/analyze-photo';
+import {
+  countUserLlmQueriesLast24h,
+  isAtLlmQueryLimit,
+  LLM_QUERY_LIMIT,
+} from '@/lib/user-llm-queries';
 import { usePet } from '@/providers/PetProvider';
+import { useAuth } from '@/providers/AuthProvider';
+import { uploadPetPhoto } from '@/lib/supabase-photos';
+
+const hasSupabaseConfig = () =>
+  !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
 
 export default function CameraScreen() {
   const insets = useSafeAreaInsets();
-  const { addPhoto, petName } = usePet();
+  const { addPhoto, petName, petType, userId, addBadges } = usePet();
+  const { user, session } = useAuth();
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [photoResult, setPhotoResult] = useState<{
+    score: number;
+    message: string;
+    nutrients: string[];
+    calorie: number;
+  } | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const successAnim = useRef(new Animated.Value(0)).current;
   const bounceAnim = useRef(new Animated.Value(0)).current;
+  const jumpAnim = useRef(new Animated.Value(0)).current;
+
+  const petConfig = petType ? PET_CONFIGS[petType] : PET_CONFIGS.mochi;
+
+  useEffect(() => {
+    if (!showSuccess) {
+      jumpAnim.setValue(0);
+      return;
+    }
+    const hop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(jumpAnim, {
+          toValue: -32,
+          duration: 260,
+          useNativeDriver: true,
+        }),
+        Animated.spring(jumpAnim, {
+          toValue: 0,
+          friction: 4,
+          tension: 220,
+          useNativeDriver: true,
+        }),
+        Animated.delay(180),
+      ])
+    );
+    hop.start();
+    return () => hop.stop();
+  }, [showSuccess, jumpAnim]);
 
   const handleTakePhoto = useCallback(async () => {
     try {
@@ -34,9 +85,8 @@ export default function CameraScreen() {
       }
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.7,
+        allowsEditing: false,
+        quality: 0.92,
       });
       if (!result.canceled && result.assets[0]) {
         console.log('[Camera] Photo taken:', result.assets[0].uri);
@@ -52,9 +102,8 @@ export default function CameraScreen() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.7,
+        allowsEditing: false,
+        quality: 0.92,
       });
       if (!result.canceled && result.assets[0]) {
         console.log('[Camera] Image picked:', result.assets[0].uri);
@@ -66,9 +115,79 @@ export default function CameraScreen() {
     }
   }, []);
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
+    const rating = rollPhotoRating();
+
+    if (!capturedUri) {
+      addPhoto();
+      setPhotoResult({ score: rating.score, message: rating.message, nutrients: [], calorie: 0 });
+      setShowSuccess(true);
+      Animated.parallel([
+        Animated.spring(successAnim, { toValue: 1, friction: 4, tension: 80, useNativeDriver: true }),
+        Animated.sequence([
+          Animated.timing(bounceAnim, { toValue: -15, duration: 150, useNativeDriver: true }),
+          Animated.spring(bounceAnim, { toValue: 0, friction: 3, tension: 200, useNativeDriver: true }),
+        ]),
+      ]).start();
+      setTimeout(() => router.back(), 2200);
+      return;
+    }
+
+    setIsAnalyzing(true);
+    let nutrients: string[] = [];
+    let calorie = 0;
+
+    try {
+      if (hasSupabaseConfig()) {
+        let skipAnalysis = false;
+        if (user?.id) {
+          try {
+            const queryCount = await countUserLlmQueriesLast24h(user.id);
+            if (isAtLlmQueryLimit(queryCount)) {
+              await new Promise<void>((resolve) => {
+                Alert.alert(
+                  'Daily analysis limit',
+                  `You've reached the limit of ${LLM_QUERY_LIMIT} food analyses in the last 24 hours. Your photo will still be saved, but it won't be analyzed for nutrients or calories.`,
+                  [{ text: 'OK', onPress: () => resolve() }],
+                  { cancelable: false }
+                );
+              });
+              skipAnalysis = true;
+            }
+          } catch (err) {
+            console.error('[Camera] LLM rate limit check failed:', err);
+          }
+        }
+
+        if (!skipAnalysis) {
+          // Analyze first, then upload so pet_photos gets nutrients/calories on insert (no separate UPDATE).
+          const result = await analyzePhoto(capturedUri, session?.access_token);
+          if (result.success) {
+            nutrients = result.nutrients;
+            calorie = result.calorie;
+            if (userId && result.nutrients.length > 0) await addBadges(nutrients);
+          }
+          if (userId && user?.id === userId) {
+            if (result.success) {
+              await uploadPetPhoto(capturedUri, userId, { nutrients, calorie });
+            } else {
+              await uploadPetPhoto(capturedUri, userId);
+            }
+          }
+        } else if (userId && user?.id === userId) {
+          await uploadPetPhoto(capturedUri, userId);
+        }
+      }
+    } catch (e) {
+      console.error('[Camera] Error uploading photo:', e);
+      Alert.alert('Upload failed', 'Photo saved locally but could not sync to cloud. You can try again later.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addPhoto();
+    setPhotoResult({ score: rating.score, message: rating.message, nutrients, calorie });
     setShowSuccess(true);
 
     Animated.parallel([
@@ -81,8 +200,8 @@ export default function CameraScreen() {
 
     setTimeout(() => {
       router.back();
-    }, 1800);
-  }, [addPhoto, successAnim, bounceAnim]);
+    }, 2200);
+  }, [addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session]);
 
   const handleRetake = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -96,7 +215,7 @@ export default function CameraScreen() {
         style={StyleSheet.absoluteFill}
       />
 
-      <View style={[styles.content, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }]}>
+      <View style={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.closeBtn} testID="close-camera">
             <X size={24} color={Colors.darkBrown} />
@@ -107,6 +226,19 @@ export default function CameraScreen() {
 
         {showSuccess ? (
           <View style={styles.successContainer}>
+            <Animated.View
+              style={[
+                styles.petJumpWrap,
+                { transform: [{ translateY: jumpAnim }] },
+              ]}
+            >
+              <Image
+                source={petConfig.image}
+                style={styles.petSuccessImage}
+                resizeMode="contain"
+                accessibilityLabel={`${petName} is happy`}
+              />
+            </Animated.View>
             <Animated.View style={[
               styles.successContent,
               {
@@ -117,8 +249,27 @@ export default function CameraScreen() {
               },
             ]}>
               <Sparkles size={48} color={Colors.softOrange} />
-              <Text style={styles.successTitle}>{petName} loved it!</Text>
-              <Text style={styles.successSubtitle}>Happiness boosted! +15 ✨</Text>
+              <Text style={styles.successTitle}>
+                {photoResult ? `${petName} gave it a ${photoResult.score}/10!` : `${petName} loved it!`}
+              </Text>
+              <Text style={styles.successSubtitle}>
+                {photoResult ? `${petName} ${photoResult.message}! ` : ''}Happiness boosted! +15 ✨
+              </Text>
+              {photoResult?.nutrients && photoResult.nutrients.length > 0 && (
+                <View style={styles.rewardRow}>
+                  <Text style={styles.rewardLabel}>Badges earned:</Text>
+                  <View style={styles.badgeList}>
+                    {photoResult.nutrients.map((n) => (
+                      <Text key={n} style={styles.rewardItem}>
+                        {getNutrientEmoji(n)} {formatNutrientName(n)}
+                      </Text>
+                    ))}
+                  </View>
+                  {photoResult.calorie > 0 && (
+                    <Text style={styles.calorieText}>~{photoResult.calorie} cal</Text>
+                  )}
+                </View>
+              )}
             </Animated.View>
           </View>
         ) : capturedUri ? (
@@ -132,9 +283,23 @@ export default function CameraScreen() {
                 <X size={20} color={Colors.brown} />
                 <Text style={styles.retakeBtnText}>Retake</Text>
               </Pressable>
-              <Pressable style={styles.confirmBtn} onPress={handleConfirm} testID="confirm-button">
-                <Check size={20} color="#FFF" />
-                <Text style={styles.confirmBtnText}>Share!</Text>
+              <Pressable
+                style={[styles.confirmBtn, isAnalyzing && styles.confirmBtnDisabled]}
+                onPress={handleConfirm}
+                disabled={isAnalyzing}
+                testID="confirm-button"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <ActivityIndicator size="small" color="#FFF" />
+                    <Text style={styles.confirmBtnText}>Analyzing...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Check size={20} color="#FFF" />
+                    <Text style={styles.confirmBtnText}>Share!</Text>
+                  </>
+                )}
               </Pressable>
             </View>
           </View>
@@ -151,7 +316,7 @@ export default function CameraScreen() {
                 <Text style={styles.captureBtnText}>Take Photo</Text>
               </Pressable>
               <Pressable style={styles.galleryBtn} onPress={handlePickImage} testID="pick-image-button">
-                <ImagePlus size={24} color={Colors.softOrange} />
+                <ImagePlus size={24} color="#FFF" />
                 <Text style={styles.galleryBtnText}>Choose from Gallery</Text>
               </Pressable>
             </View>
@@ -240,16 +405,19 @@ const styles = StyleSheet.create({
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: Colors.softOrange,
     paddingVertical: 16,
     borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: Colors.beige,
+    shadowColor: Colors.softOrange,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 5,
   },
   galleryBtnText: {
     fontSize: 16,
     fontWeight: '600' as const,
-    color: Colors.softOrange,
+    color: '#FFF',
   },
   previewContainer: {
     flex: 1,
@@ -298,13 +466,16 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: Colors.brown,
   },
+  confirmBtnDisabled: {
+    opacity: 0.7,
+  },
   confirmBtn: {
     flex: 1.5,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     gap: 8,
-    backgroundColor: Colors.softGreen,
+    backgroundColor: '#4CAF50',
     paddingVertical: 16,
     borderRadius: 16,
   },
@@ -317,6 +488,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
+    gap: 8,
+  },
+  petJumpWrap: {
+    marginBottom: 4,
+  },
+  petSuccessImage: {
+    width: 140,
+    height: 140,
   },
   successContent: {
     alignItems: 'center' as const,
@@ -331,5 +510,35 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: Colors.softOrange,
     fontWeight: '600' as const,
+  },
+  rewardRow: {
+    alignItems: 'center' as const,
+    gap: 8,
+    marginTop: 16,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  badgeList: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+  },
+  calorieText: {
+    fontSize: 12,
+    color: Colors.brown,
+    opacity: 0.8,
+  },
+  rewardLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.brown,
+  },
+  rewardItem: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.darkBrown,
   },
 });

@@ -1,13 +1,14 @@
 {
   "expo": {
-    "name": "Virtual Pet Life",
+    "name": "Marumimi",
     "slug": "virtual-pet-life",
+    "owner": "ywang155",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rork-app",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -15,27 +16,61 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.virtual-pet-life"
+      "bundleIdentifier": "com.tradingbrothers.virtual-pet-life",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": ["exp+virtual-pet-life"],
+            "CFBundleURLName": "expo"
+          }
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.virtual_pet_life"
+      "package": "com.tradingbrothers.virtual_pet"
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
     },
+    "extra": {
+      "eas": {
+        "projectId": "696875cc-2a35-45dc-9b94-f7b6d3ca85ef"
+      }
+    },
     "plugins": [
+      "expo-font",
+      "expo-sqlite",
       [
-        "expo-router",
+        "expo-notifications",
         {
-          "origin": "https://rork.com/"
+          "icon": "./assets/images/icon.png",
+          "color": "#D4A574",
+          "iosDisplayInForeground": true
         }
       ],
-      "expo-font",
-      "expo-web-browser"
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.275450256852-hag1r7e77e68k8kpnulj0oakqegadasa"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos.",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save photos to your library."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

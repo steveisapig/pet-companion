@@ -2,21 +2,31 @@ import React, { useEffect } from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import { useAuth } from '@/providers/AuthProvider';
 import { usePet } from '@/providers/PetProvider';
 import Colors from '@/constants/colors';
 
+const hasSupabaseConfig = () =>
+  !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+
 export default function IndexScreen() {
-  const { onboardingComplete, isLoading } = usePet();
+  const { isSignedIn, isLoading: authLoading } = useAuth();
+  const { onboardingComplete, isLoading: petLoading } = usePet();
 
   useEffect(() => {
-    if (isLoading) return;
-    console.log('[Index] Onboarding complete:', onboardingComplete);
+    if (authLoading || petLoading) return;
+
+    if (hasSupabaseConfig() && !isSignedIn) {
+      router.replace('/sign-in');
+      return;
+    }
+
     if (onboardingComplete) {
       router.replace('/pet');
     } else {
       router.replace('/onboarding');
     }
-  }, [isLoading, onboardingComplete]);
+  }, [authLoading, petLoading, isSignedIn, onboardingComplete]);
 
   return (
     <View style={styles.container}>

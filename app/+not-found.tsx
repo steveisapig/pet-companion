@@ -9,7 +9,7 @@ export default function NotFoundScreen() {
       <Text style={styles.emoji}>🐾</Text>
       <Text style={styles.title}>Oops!</Text>
       <Text style={styles.subtitle}>This page doesn't exist</Text>
-      <Pressable style={styles.button} onPress={() => router.replace('/')}>
+      <Pressable style={styles.button} onPress={() => router.replace('/sign-in')}>
         <Text style={styles.buttonText}>Go Home</Text>
       </Pressable>
     </View>

@@ -70,3 +70,32 @@ export const PHOTO_HAPPINESS_BOOST = 15;
 export const TAP_HAPPINESS_BOOST = 3;
 export const MAX_HAPPINESS = 100;
 export const MIN_HAPPINESS = 0;
+
+/** Leveling: experience required increases exponentially */
+export const LEVEL_EXP_BASE = 50;
+export const LEVEL_EXP_MULTIPLIER = 1.5;
+
+/** Total experience required to reach a level. Level 1 = 0, Level 2 = 50, Level 3 = 125, etc. */
+export function getExpForLevel(level: number): number {
+  if (level <= 1) return 0;
+  return Math.floor(LEVEL_EXP_BASE * (Math.pow(LEVEL_EXP_MULTIPLIER, level - 1) - 1) / (LEVEL_EXP_MULTIPLIER - 1));
+}
+
+/** Get current level from total experience */
+export function getLevelFromExperience(experience: number): number {
+  let level = 1;
+  while (getExpForLevel(level + 1) <= experience) {
+    level++;
+  }
+  return level;
+}
+
+/** Experience progress within current level (0–1) */
+export function getExpProgressInLevel(experience: number): number {
+  const level = getLevelFromExperience(experience);
+  const expForCurrent = getExpForLevel(level);
+  const expForNext = getExpForLevel(level + 1);
+  const expInLevel = experience - expForCurrent;
+  const expNeeded = expForNext - expForCurrent;
+  return expNeeded > 0 ? expInLevel / expNeeded : 1;
+}

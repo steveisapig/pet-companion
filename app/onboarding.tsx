@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { ChevronRight, Sparkles } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
+import { useOnboarding } from '@/providers/OnboardingProvider';
 import { PET_CONFIGS, PetType } from '@/constants/pets';
 import { usePet } from '@/providers/PetProvider';
 
@@ -25,12 +26,33 @@ const petTypes: PetType[] = ['mochi', 'nugget', 'cookie'];
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const { selectPet } = usePet();
+  const { startOnboarding } = useOnboarding();
   const [selectedPet, setSelectedPet] = useState<PetType>('mochi');
   const [petName, setPetName] = useState<string>('');
   const [step, setStep] = useState<'select' | 'name'>('select');
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
   const scaleAnims = useRef(petTypes.map(() => new Animated.Value(1))).current;
+  const continueBtnFloat = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(continueBtnFloat, {
+          toValue: -5,
+          duration: 1400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(continueBtnFloat, {
+          toValue: 0,
+          duration: 1400,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [continueBtnFloat]);
 
   const handlePetSelect = useCallback((type: PetType, index: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -56,12 +78,13 @@ export default function OnboardingScreen() {
     });
   }, [fadeAnim, slideAnim]);
 
-  const handleFinish = useCallback(() => {
+  const handleFinish = useCallback(async () => {
     const name = petName.trim() || PET_CONFIGS[selectedPet].name;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    selectPet(selectedPet, name);
+    await selectPet(selectedPet, name);
+    await startOnboarding();
     router.replace('/pet');
-  }, [petName, selectedPet, selectPet]);
+  }, [petName, selectedPet, selectPet, startOnboarding]);
 
   const config = PET_CONFIGS[selectedPet];
 
@@ -114,8 +137,10 @@ export default function OnboardingScreen() {
                           <View style={[styles.petImageContainer, { backgroundColor: pet.color }]}>
                             <Image source={pet.image} style={styles.petImage} resizeMode="contain" />
                           </View>
-                          <Text style={styles.petName}>{pet.name}</Text>
-                          <Text style={styles.petDesc}>{pet.description}</Text>
+                          <View style={styles.petTextColumn}>
+                            <Text style={styles.petName}>{pet.name}</Text>
+                            <Text style={styles.petDesc}>{pet.description}</Text>
+                          </View>
                           {isSelected && (
                             <View style={[styles.selectedBadge, { backgroundColor: pet.accentColor }]}>
                               <Text style={styles.selectedBadgeText}>Selected</Text>
@@ -127,14 +152,16 @@ export default function OnboardingScreen() {
                   })}
                 </View>
 
-                <Pressable
-                  style={[styles.continueBtn, { backgroundColor: config.accentColor }]}
-                  onPress={handleContinue}
-                  testID="continue-button"
-                >
-                  <Text style={styles.continueBtnText}>Continue</Text>
-                  <ChevronRight size={20} color="#FFF" />
-                </Pressable>
+                <Animated.View style={{ transform: [{ translateY: continueBtnFloat }] }}>
+                  <Pressable
+                    style={[styles.continueBtn, { backgroundColor: config.accentColor }]}
+                    onPress={handleContinue}
+                    testID="continue-button"
+                  >
+                    <Text style={styles.continueBtnText}>Continue</Text>
+                    <ChevronRight size={20} color="#FFF" />
+                  </Pressable>
+                </Animated.View>
               </>
             ) : (
               <>
@@ -159,14 +186,16 @@ export default function OnboardingScreen() {
                   />
                 </View>
 
-                <Pressable
-                  style={[styles.continueBtn, { backgroundColor: config.accentColor }]}
-                  onPress={handleFinish}
-                  testID="finish-button"
-                >
-                  <Text style={styles.continueBtnText}>{"Let's Go!"}</Text>
-                  <Sparkles size={20} color="#FFF" />
-                </Pressable>
+                <Animated.View style={{ transform: [{ translateY: continueBtnFloat }] }}>
+                  <Pressable
+                    style={[styles.continueBtn, { backgroundColor: config.accentColor }]}
+                    onPress={handleFinish}
+                    testID="finish-button"
+                  >
+                    <Text style={styles.continueBtnText}>{"Let's Go!"}</Text>
+                    <Sparkles size={20} color="#FFF" />
+                  </Pressable>
+                </Animated.View>
               </>
             )}
           </Animated.View>
@@ -247,17 +276,22 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
   },
+  petTextColumn: {
+    flex: 1,
+    flexDirection: 'column' as const,
+    justifyContent: 'center' as const,
+    minWidth: 0,
+  },
   petName: {
     fontSize: 18,
     fontWeight: '700' as const,
     color: Colors.darkBrown,
-    marginBottom: 4,
+    marginBottom: 10,
   },
   petDesc: {
     fontSize: 13,
     color: Colors.brown,
     opacity: 0.7,
-    flex: 1,
     lineHeight: 18,
   },
   selectedBadge: {
