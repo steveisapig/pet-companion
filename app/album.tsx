@@ -30,6 +30,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, Download, LayoutGrid, List, X } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
 import { getPetPhotos, type PetPhoto } from '@/lib/supabase-photos';
 import { getAlbumPhotos, savePhotoToDevice } from '@/lib/photo-album';
@@ -63,14 +64,17 @@ function isSameCalendarDay(a: Date, b: Date): boolean {
   );
 }
 
-function formatDayTitle(iso: string): string {
+function formatDayTitle(
+  iso: string,
+  t: (key: 'album.photosTitle' | 'album.today' | 'album.yesterday') => string
+): string {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'Photos';
+  if (Number.isNaN(d.getTime())) return t('album.photosTitle');
   const now = new Date();
-  if (isSameCalendarDay(d, now)) return 'Today';
+  if (isSameCalendarDay(d, now)) return t('album.today');
   const y = new Date(now);
   y.setDate(y.getDate() - 1);
-  if (isSameCalendarDay(d, y)) return 'Yesterday';
+  if (isSameCalendarDay(d, y)) return t('album.yesterday');
   return d.toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'short',
@@ -79,7 +83,10 @@ function formatDayTitle(iso: string): string {
   });
 }
 
-function groupPhotosByDay(photos: PetPhoto[]): { title: string; data: PetPhoto[] }[] {
+function groupPhotosByDay(
+  photos: PetPhoto[],
+  t: (key: 'album.photosTitle' | 'album.today' | 'album.yesterday') => string
+): { title: string; data: PetPhoto[] }[] {
   const sorted = [...photos].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
@@ -88,7 +95,7 @@ function groupPhotosByDay(photos: PetPhoto[]): { title: string; data: PetPhoto[]
   let currentSection: PetPhoto[] = [];
 
   for (const p of sorted) {
-    const title = formatDayTitle(p.created_at);
+    const title = formatDayTitle(p.created_at, t);
     if (title !== currentTitle) {
       if (currentSection.length && currentTitle !== null) {
         sections.push({ title: currentTitle, data: currentSection });
@@ -112,8 +119,9 @@ function formatPhotoTime(iso: string): string {
 }
 
 function NutrientChips({ itemTypes }: { itemTypes: number[] | null }) {
+  const { t } = useAppTranslation();
   if (!itemTypes || itemTypes.length === 0) {
-    return <Text style={styles.metaMuted}>No nutrients logged</Text>;
+    return <Text style={styles.metaMuted}>{t('album.noNutrientsLogged')}</Text>;
   }
   return (
     <View style={styles.chipRow}>
@@ -135,6 +143,7 @@ function NutrientChips({ itemTypes }: { itemTypes: number[] | null }) {
 
 export default function AlbumScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { userId } = usePet();
   /** null = gallery closed; number = scroll index when opened */
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
@@ -245,16 +254,16 @@ export default function AlbumScreen() {
     try {
       const result = await savePhotoToDevice(photo.url);
       if (result.success) {
-        Alert.alert('Saved', 'Photo saved to your Photos app.');
+        Alert.alert(t('album.savedTitle'), t('album.savedBody'));
       } else {
-        Alert.alert('Could not save', result.error ?? 'Please try again.');
+        Alert.alert(t('album.saveFailedTitle'), result.error ?? t('album.saveFailedBody'));
       }
     } finally {
       setIsSaving(false);
     }
-  }, [galleryIndex, activeGalleryIndex, photos]);
+  }, [activeGalleryIndex, galleryIndex, photos, t]);
 
-  const sections = useMemo(() => groupPhotosByDay(photos), [photos]);
+  const sections = useMemo(() => groupPhotosByDay(photos, t), [photos, t]);
 
   const refreshControl = (
     <RefreshControl
@@ -306,7 +315,7 @@ export default function AlbumScreen() {
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
             <ChevronLeft size={24} color={Colors.darkBrown} />
-            <Text style={styles.backText}>Back</Text>
+            <Text style={styles.backText}>{t('common.back')}</Text>
           </Pressable>
           <Text style={styles.headerTitle}>Marumimi</Text>
           <View style={styles.headerRight}>
@@ -314,7 +323,7 @@ export default function AlbumScreen() {
               style={styles.viewToggle}
               onPress={() => setViewMode((m) => (m === 'list' ? 'grid' : 'list'))}
               accessibilityRole="button"
-              accessibilityLabel={viewMode === 'list' ? 'Show photo grid' : 'Show list by day'}
+              accessibilityLabel={viewMode === 'list' ? t('album.showPhotoGrid') : t('album.showListByDay')}
             >
               {viewMode === 'list' ? (
                 <LayoutGrid size={22} color={Colors.darkBrown} />
@@ -341,9 +350,9 @@ export default function AlbumScreen() {
           )
         ) : photos.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>No photos yet</Text>
+            <Text style={styles.emptyTitle}>{t('album.emptyTitle')}</Text>
             <Text style={styles.emptySubtitle}>
-              Photos you share with your pet will appear here
+              {t('album.emptySubtitle')}
             </Text>
           </View>
         ) : viewMode === 'list' ? (
@@ -460,7 +469,7 @@ export default function AlbumScreen() {
                       style={[styles.modalCloseBtn, { top: insets.top + 12 }]}
                       onPress={closeGallery}
                       accessibilityRole="button"
-                      accessibilityLabel="Close photo viewer"
+                      accessibilityLabel={t('album.closeViewer')}
                     >
                       <X size={26} color="#fff" />
                     </Pressable>

@@ -16,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { Camera, ImagePlus, X, Check, Sparkles } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { PET_CONFIGS, getPetImageForMood } from '@/constants/pets';
 import { formatNutrientName, getNutrientEmoji } from '@/constants/badges';
 import { photoRatingFromNutrientCount } from '@/lib/photo-rating';
@@ -35,13 +36,14 @@ const hasSupabaseConfig = () =>
 
 export default function CameraScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { addPhoto, petName, petType, mood, userId, addBadges } = usePet();
   const { user, session } = useAuth();
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [photoResult, setPhotoResult] = useState<{
     score: number;
-    message: string;
+    tier: 'little' | 'like' | 'love';
     nutrients: string[];
     calorie: number;
   } | null>(null);
@@ -82,8 +84,8 @@ export default function CameraScreen() {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(
-          'Permission needed',
-          'Allow camera access to take photos you share with your pet. Photos with food will be analyzed for nutrients and calories.'
+          t('camera.permissionNeeded'),
+          t('camera.permissionBody')
         );
         return;
       }
@@ -98,9 +100,9 @@ export default function CameraScreen() {
       }
     } catch (e) {
       console.error('[Camera] Error taking photo:', e);
-      Alert.alert('Error', 'Could not take photo. Please try again.');
+      Alert.alert(t('camera.errorTitle'), t('camera.takePhotoError'));
     }
-  }, []);
+  }, [t]);
 
   const handlePickImage = useCallback(async () => {
     try {
@@ -115,15 +117,15 @@ export default function CameraScreen() {
       }
     } catch (e) {
       console.error('[Camera] Error picking image:', e);
-      Alert.alert('Error', 'Could not pick image. Please try again.');
+      Alert.alert(t('camera.errorTitle'), t('camera.pickImageError'));
     }
-  }, []);
+  }, [t]);
 
   const handleConfirm = useCallback(async () => {
     if (!capturedUri) {
       const rating = photoRatingFromNutrientCount(0);
       addPhoto();
-      setPhotoResult({ score: rating.score, message: rating.message, nutrients: [], calorie: 0 });
+      setPhotoResult({ score: rating.score, tier: rating.tier, nutrients: [], calorie: 0 });
       setShowSuccess(true);
       Animated.parallel([
         Animated.spring(successAnim, { toValue: 1, friction: 4, tension: 80, useNativeDriver: true }),
@@ -149,9 +151,9 @@ export default function CameraScreen() {
             if (isAtLlmQueryLimit(queryCount)) {
               await new Promise<void>((resolve) => {
                 Alert.alert(
-                  'Daily analysis limit',
-                  `You've reached the limit of ${LLM_QUERY_LIMIT} food analyses in the last 24 hours. Your photo will still be saved, but it won't be analyzed for nutrients or calories.`,
-                  [{ text: 'OK', onPress: () => resolve() }],
+                  t('camera.dailyAnalysisLimitTitle'),
+                  t('camera.dailyAnalysisLimitBody', { count: LLM_QUERY_LIMIT }),
+                  [{ text: t('common.ok'), onPress: () => resolve() }],
                   { cancelable: false }
                 );
               });
@@ -191,7 +193,7 @@ export default function CameraScreen() {
       }
     } catch (e) {
       console.error('[Camera] Error uploading photo:', e);
-      Alert.alert('Upload failed', 'Photo saved locally but could not sync to cloud. You can try again later.');
+      Alert.alert(t('camera.uploadFailedTitle'), t('camera.uploadFailedBody'));
     } finally {
       setIsAnalyzing(false);
     }
@@ -199,7 +201,7 @@ export default function CameraScreen() {
     const rating = photoRatingFromNutrientCount(nutrients.length);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addPhoto();
-    setPhotoResult({ score: rating.score, message: rating.message, nutrients, calorie });
+    setPhotoResult({ score: rating.score, tier: rating.tier, nutrients, calorie });
     setShowSuccess(true);
 
     Animated.parallel([
@@ -209,7 +211,7 @@ export default function CameraScreen() {
         Animated.spring(bounceAnim, { toValue: 0, friction: 3, tension: 200, useNativeDriver: true }),
       ]),
     ]).start();
-  }, [addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session]);
+  }, [addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session, t]);
 
   const handleContinueAfterSuccess = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -233,7 +235,7 @@ export default function CameraScreen() {
           <Pressable onPress={() => router.back()} style={styles.closeBtn} testID="close-camera">
             <X size={24} color={Colors.darkBrown} />
           </Pressable>
-          <Text style={styles.headerTitle}>Share a Moment</Text>
+          <Text style={styles.headerTitle}>{t('camera.headerTitle')}</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -249,7 +251,7 @@ export default function CameraScreen() {
                 source={getPetImageForMood(petConfig, mood)}
                 style={styles.petSuccessImage}
                 resizeMode="contain"
-                accessibilityLabel={`${petName} is happy`}
+                accessibilityLabel={t('camera.petHappyAccessibility', { name: petName })}
               />
             </Animated.View>
             <Animated.View style={[
@@ -263,14 +265,18 @@ export default function CameraScreen() {
             ]}>
               <Sparkles size={48} color={Colors.softOrange} />
               <Text style={styles.successTitle}>
-                {photoResult ? `${petName} gave it a ${photoResult.score}/10!` : `${petName} loved it!`}
+                {photoResult
+                  ? t('camera.scoreTitle', { name: petName, score: String(photoResult.score) })
+                  : t('camera.lovedTitle', { name: petName })}
               </Text>
               <Text style={styles.successSubtitle}>
-                {photoResult ? `${petName} ${photoResult.message}! ` : ''}Happiness boosted! +15 ✨
+                {photoResult
+                  ? `${petName} ${t(`camera.reaction.${photoResult.tier}`)}! `
+                  : ''}{t('camera.happinessBoosted')}
               </Text>
               {photoResult?.nutrients && photoResult.nutrients.length > 0 && (
                 <View style={styles.rewardRow}>
-                  <Text style={styles.rewardLabel}>Badges earned:</Text>
+                  <Text style={styles.rewardLabel}>{t('camera.badgesEarned')}</Text>
                   <View style={styles.badgeList}>
                     {photoResult.nutrients.map((n) => (
                       <Text key={n} style={styles.rewardItem}>
@@ -279,7 +285,7 @@ export default function CameraScreen() {
                     ))}
                   </View>
                   {photoResult.calorie > 0 && (
-                    <Text style={styles.calorieText}>~{photoResult.calorie} cal</Text>
+                    <Text style={styles.calorieText}>{t('camera.caloriesShort', { count: photoResult.calorie })}</Text>
                   )}
                 </View>
               )}
@@ -289,7 +295,7 @@ export default function CameraScreen() {
               onPress={handleContinueAfterSuccess}
               testID="success-continue-button"
             >
-              <Text style={styles.continueBtnText}>Continue</Text>
+              <Text style={styles.continueBtnText}>{t('common.continue')}</Text>
             </Pressable>
           </View>
         ) : capturedUri ? (
@@ -297,11 +303,11 @@ export default function CameraScreen() {
             <View style={styles.previewImageWrap}>
               <Image source={{ uri: capturedUri }} style={styles.previewImage} />
             </View>
-            <Text style={styles.previewHint}>Share this with {petName}?</Text>
+            <Text style={styles.previewHint}>{t('camera.previewHint', { name: petName })}</Text>
             <View style={styles.previewActions}>
               <Pressable style={styles.retakeBtn} onPress={handleRetake} testID="retake-button">
                 <X size={20} color={Colors.brown} />
-                <Text style={styles.retakeBtnText}>Retake</Text>
+                <Text style={styles.retakeBtnText}>{t('common.retake')}</Text>
               </Pressable>
               <Pressable
                 style={[styles.confirmBtn, isAnalyzing && styles.confirmBtnDisabled]}
@@ -312,12 +318,12 @@ export default function CameraScreen() {
                 {isAnalyzing ? (
                   <>
                     <ActivityIndicator size="small" color="#FFF" />
-                    <Text style={styles.confirmBtnText}>Analyzing...</Text>
+                    <Text style={styles.confirmBtnText}>{t('camera.analyzing')}</Text>
                   </>
                 ) : (
                   <>
                     <Check size={20} color="#FFF" />
-                    <Text style={styles.confirmBtnText}>Share!</Text>
+                    <Text style={styles.confirmBtnText}>{t('camera.shareNow')}</Text>
                   </>
                 )}
               </Pressable>
@@ -327,17 +333,17 @@ export default function CameraScreen() {
           <View style={styles.captureContainer}>
             <View style={styles.placeholderImage}>
               <Camera size={64} color={Colors.caramel} strokeWidth={1.2} />
-              <Text style={styles.placeholderText}>Capture a moment from{'\n'}your day for {petName}</Text>
+              <Text style={styles.placeholderText}>{t('camera.capturePrompt', { name: petName })}</Text>
             </View>
 
             <View style={styles.captureActions}>
               <Pressable style={styles.captureBtn} onPress={handleTakePhoto} testID="take-photo-button">
                 <Camera size={24} color="#FFF" />
-                <Text style={styles.captureBtnText}>Take Photo</Text>
+                <Text style={styles.captureBtnText}>{t('camera.takePhoto')}</Text>
               </Pressable>
               <Pressable style={styles.galleryBtn} onPress={handlePickImage} testID="pick-image-button">
                 <ImagePlus size={24} color="#FFF" />
-                <Text style={styles.galleryBtnText}>Choose from Gallery</Text>
+                <Text style={styles.galleryBtnText}>{t('camera.chooseFromGallery')}</Text>
               </Pressable>
             </View>
           </View>

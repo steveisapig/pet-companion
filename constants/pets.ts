@@ -68,6 +68,14 @@ export const HAPPINESS_THRESHOLDS: Record<MoodLevel, number> = {
   miserable: 0,
 };
 
+export function getPetDescriptionKey(type: PetType): `pets.${PetType}.description` {
+  return `pets.${type}.description`;
+}
+
+export function getMoodLabelKey(mood: MoodLevel): `pet.moods.${MoodLevel}` {
+  return `pet.moods.${mood}`;
+}
+
 export function getMoodFromHappiness(happiness: number): MoodLevel {
   if (happiness >= HAPPINESS_THRESHOLDS.ecstatic) return 'ecstatic';
   if (happiness >= HAPPINESS_THRESHOLDS.happy) return 'happy';

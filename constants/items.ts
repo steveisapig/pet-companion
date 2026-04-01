@@ -119,3 +119,7 @@ export const PLACE_DEFS: Record<PlaceId, PlaceDef> = {
     ],
   },
 };
+
+export function getPlaceNameKey(placeId: PlaceId): `walk.places.${PlaceId}` {
+  return `walk.places.${placeId}`;
+}

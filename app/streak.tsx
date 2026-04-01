@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
 import {
   computeStreakLengthFromDates,
@@ -27,8 +28,6 @@ const hasSupabaseConfig = () =>
 const SCREEN_W = Dimensions.get('window').width;
 const H_PAD = 20;
 const CELL_W = (SCREEN_W - H_PAD * 2) / 7;
-
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function monthBounds(y: number, m0: number): { start: string; end: string } {
   const start = new Date(y, m0, 1);
@@ -55,6 +54,7 @@ function buildMonthCells(year: number, month0: number): ({ day: number; key: str
 
 export default function StreakScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { userId } = usePet();
   const [view, setView] = useState(() => new Date());
   const year = view.getFullYear();
@@ -93,6 +93,18 @@ export default function StreakScreen() {
 
   const streakSet = useMemo(() => new Set(monthDates), [monthDates]);
   const streakLength = useMemo(() => computeStreakLengthFromDates(allDates), [allDates]);
+  const weekdays = useMemo(
+    () => [
+      t('streak.weekdays.sun'),
+      t('streak.weekdays.mon'),
+      t('streak.weekdays.tue'),
+      t('streak.weekdays.wed'),
+      t('streak.weekdays.thu'),
+      t('streak.weekdays.fri'),
+      t('streak.weekdays.sat'),
+    ],
+    [t]
+  );
 
   const cells = useMemo(() => buildMonthCells(year, month0), [year, month0]);
   const title = view.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
@@ -122,14 +134,14 @@ export default function StreakScreen() {
             </Pressable>
           </View>
           <Text style={styles.title} pointerEvents="none">
-            Streak
+            {t('streak.title')}
           </Text>
           <View style={[styles.headerSide, styles.headerSideEnd]} />
         </View>
 
         {!userId || !hasSupabaseConfig() ? (
           <Text style={styles.muted}>
-            Sign in with cloud sync enabled to track your photo streak on the calendar.
+            {t('streak.signInRequired')}
           </Text>
         ) : (
           <>
@@ -137,11 +149,11 @@ export default function StreakScreen() {
               <Text style={styles.streakEmoji}>🔥</Text>
               <View>
                 <Text style={styles.streakValue}>{loading ? '…' : streakLength}</Text>
-                <Text style={styles.streakLabel}>day streak</Text>
+                <Text style={styles.streakLabel}>{t('streak.dayStreak')}</Text>
               </View>
             </View>
             <Text style={styles.hint}>
-              A day counts when you share at least one photo with Share a Moment (synced to your account).
+              {t('streak.hint')}
             </Text>
 
             <View style={styles.monthNav}>
@@ -155,7 +167,7 @@ export default function StreakScreen() {
             </View>
 
             <View style={styles.weekRow}>
-              {WEEKDAYS.map((w) => (
+              {weekdays.map((w) => (
                 <Text key={w} style={styles.weekday}>
                   {w}
                 </Text>
@@ -190,7 +202,7 @@ export default function StreakScreen() {
                 </View>
                 <View style={styles.legendRow}>
                   <View style={styles.legendSwatch} />
-                  <Text style={styles.legendText}>At least one photo shared that day</Text>
+                  <Text style={styles.legendText}>{t('streak.legend')}</Text>
                 </View>
               </View>
             )}

@@ -157,13 +157,28 @@ export const [PetProvider, usePet] = createContextHook(() => {
 
   const addPhoto = useCallback(() => {
     console.log('[PetProvider] Photo added!');
-    updateAndSave(prev => ({
-      ...prev,
-      happiness: Math.min(MAX_HAPPINESS, prev.happiness + PHOTO_HAPPINESS_BOOST),
-      photosCount: prev.photosCount + 1,
-      lastInteractionTime: Date.now(),
-    }));
-  }, [updateAndSave]);
+    setPetState((prev) => {
+      const prevExperience = prev.photosCount * 15;
+      const prevLevel = getLevelFromExperience(prevExperience);
+      const nextPhotosCount = prev.photosCount + 1;
+      const nextExperience = nextPhotosCount * 15;
+      const nextLevel = getLevelFromExperience(nextExperience);
+
+      const next = {
+        ...prev,
+        happiness: Math.min(MAX_HAPPINESS, prev.happiness + PHOTO_HAPPINESS_BOOST),
+        photosCount: nextPhotosCount,
+        lastInteractionTime: Date.now(),
+      };
+
+      if (nextLevel > prevLevel) {
+        setJustLeveledUp(true);
+      }
+
+      saveState(next);
+      return next;
+    });
+  }, [saveState]);
 
   /** Experience comes from photos only; taps do not grant XP */
   const experience = petState.photosCount * 15;
@@ -171,19 +186,7 @@ export const [PetProvider, usePet] = createContextHook(() => {
   const expProgress = getExpProgressInLevel(experience);
   const expForNextLevel = getExpForLevel(level + 1) - getExpForLevel(level);
 
-  const prevLevelRef = useRef<number | null>(null);
   const [justLeveledUp, setJustLeveledUp] = useState(false);
-
-  useEffect(() => {
-    if (prevLevelRef.current === null) {
-      prevLevelRef.current = level;
-      return;
-    }
-    if (level > prevLevelRef.current) {
-      setJustLeveledUp(true);
-      prevLevelRef.current = level;
-    }
-  }, [level]);
 
   const clearLevelUp = useCallback(() => {
     setJustLeveledUp(false);

@@ -7,8 +7,10 @@
 import { useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 
 export default function AuthCallbackScreen() {
+  const { t } = useAppTranslation();
   useEffect(() => {
     // If we land here directly (e.g. user bookmarked), redirect to home.
     // The actual OAuth flow is handled by AuthProvider + WebBrowser.
@@ -21,7 +23,7 @@ export default function AuthCallbackScreen() {
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" />
-      <Text style={styles.text}>Signing you in...</Text>
+      <Text style={styles.text}>{t('auth.callback.signingIn')}</Text>
     </View>
   );
 }

@@ -12,11 +12,13 @@ import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { formatNutrientName, getNutrientEmoji } from '@/constants/badges';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
 import { getBadgeCount, getTotalBadgeCount } from '@/lib/badges';
 
 export default function InventoryScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { badges } = usePet();
   const totalCount = getTotalBadgeCount(badges);
   const nutrientKeys = Object.keys(badges).sort();
@@ -36,10 +38,10 @@ export default function InventoryScreen() {
             </Pressable>
           </View>
           <Text style={styles.title} pointerEvents="none">
-            Badges
+            {t('inventory.title')}
           </Text>
           <View style={[styles.headerSide, styles.headerSideEnd, styles.headerSideZ]}>
-            <View style={styles.totalCounter} accessibilityLabel={`${totalCount} badges collected`}>
+            <View style={styles.totalCounter} accessibilityLabel={t('inventory.totalAccessibility', { count: totalCount })}>
               <Text style={styles.totalCounterText}>{totalCount}</Text>
             </View>
           </View>
@@ -47,7 +49,7 @@ export default function InventoryScreen() {
 
         {totalCount === 0 && (
           <Text style={styles.subtitle}>
-            No badges yet. Share food photos or go on a Virtual Walk to earn nutrient badges!
+            {t('inventory.subtitle')}
           </Text>
         )}
 
@@ -63,11 +65,7 @@ export default function InventoryScreen() {
             {nutrientKeys.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyEmoji}>🏅</Text>
-                <Text style={styles.emptyText}> 
-                  Earn badges two ways:{'\n'}
-                  • Share food photos — we analyze nutrients and award badges{'\n'}
-                  • Virtual Walk — tap spots to discover nutrient badges
-                </Text>
+                <Text style={styles.emptyText}>{t('inventory.emptyTitle')}</Text>
               </View>
             ) : (
               nutrientKeys.map((nutrient) => {

@@ -15,12 +15,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAuth } from '@/providers/AuthProvider';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailAuthScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { signInWithEmail } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -29,10 +31,10 @@ export default function EmailAuthScreen() {
 
   const validateEmailPassword = (): string | null => {
     if (!EMAIL_RE.test(email.trim())) {
-      return 'Enter a valid email address.';
+      return t('auth.emailAuth.validationEmail');
     }
     if (!password.length) {
-      return 'Enter your password.';
+      return t('auth.emailAuth.validationPassword');
     }
     return null;
   };
@@ -49,7 +51,7 @@ export default function EmailAuthScreen() {
       await signInWithEmail(email, password);
       router.replace('/');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign in failed');
+      setError(e instanceof Error ? e.message : t('auth.signIn.failed'));
     } finally {
       setLoading(false);
     }
@@ -86,11 +88,11 @@ export default function EmailAuthScreen() {
             <Pressable style={styles.backBtn} onPress={goBack} hitSlop={12}>
               <ChevronLeft size={26} color={Colors.darkBrown} />
             </Pressable>
-            <Text style={styles.topBarTitle}>Email sign in</Text>
+            <Text style={styles.topBarTitle}>{t('auth.emailAuth.title')}</Text>
             <View style={styles.topBarSpacer} />
           </View>
 
-          <Text style={styles.screenSubtitle}>Sign in with your email and password</Text>
+          <Text style={styles.screenSubtitle}>{t('auth.emailAuth.subtitle')}</Text>
 
           {error && (
             <View style={styles.errorBox}>
@@ -100,7 +102,7 @@ export default function EmailAuthScreen() {
 
           <View style={styles.form}>
             <View style={styles.field}>
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>{t('auth.emailAuth.email')}</Text>
               <TextInput
                 style={styles.input}
                 value={email}
@@ -115,7 +117,7 @@ export default function EmailAuthScreen() {
               />
             </View>
             <View style={styles.field}>
-              <Text style={styles.label}>Password</Text>
+              <Text style={styles.label}>{t('auth.emailAuth.password')}</Text>
               <TextInput
                 style={styles.input}
                 value={password}
@@ -137,12 +139,12 @@ export default function EmailAuthScreen() {
               {loading ? (
                 <ActivityIndicator color="#FFF" />
               ) : (
-                <Text style={styles.primaryEmailBtnText}>Sign in</Text>
+                <Text style={styles.primaryEmailBtnText}>{t('auth.emailAuth.submit')}</Text>
               )}
             </Pressable>
           </View>
 
-          <Text style={styles.hint}>Credentials are stored securely with Supabase Auth.</Text>
+          <Text style={styles.hint}>{t('auth.emailAuth.hint')}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

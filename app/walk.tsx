@@ -15,8 +15,9 @@ import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { PET_CONFIGS, getPetImageForMood } from '@/constants/pets';
-import { PLACE_DEFS, type PlaceId } from '@/constants/items';
+import { getPlaceNameKey, PLACE_DEFS, type PlaceId } from '@/constants/items';
 import { WALK_NUTRIENTS, formatNutrientName, getNutrientEmoji } from '@/constants/badges';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -27,6 +28,7 @@ const PLACES: PlaceId[] = ['park', 'beach', 'forest', 'city', 'garden'];
 
 export default function WalkScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { petType, level, mood, addBadges } = usePet();
   const [selectedPlace, setSelectedPlace] = useState<PlaceId>('park');
   const [foundBadge, setFoundBadge] = useState<{ emoji: string; name: string; isFound: boolean } | null>(null);
@@ -56,7 +58,7 @@ export default function WalkScreen() {
         setFoundBadge({ emoji: getNutrientEmoji(nutrient), name: formatNutrientName(nutrient), isFound: true });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else {
-        setFoundBadge({ emoji: '🔍', name: 'Nothing here...', isFound: false });
+        setFoundBadge({ emoji: '🔍', name: t('walk.emptySpot'), isFound: false });
       }
       foundBannerOpacity.setValue(1);
       foundBannerTimeoutRef.current = setTimeout(() => {
@@ -68,7 +70,7 @@ export default function WalkScreen() {
         }).start(() => setFoundBadge(null));
       }, 1000);
     },
-    [selectedPlace, level, addBadges, foundBannerOpacity]
+    [selectedPlace, level, addBadges, foundBannerOpacity, t]
   );
 
   useEffect(() => {
@@ -102,12 +104,12 @@ export default function WalkScreen() {
           <Pressable style={styles.backBtn} onPress={() => router.back()}>
             <ChevronLeft size={24} color={Colors.darkBrown} />
           </Pressable>
-          <Text style={styles.title}>Virtual Walk</Text>
+          <Text style={styles.title}>{t('walk.title')}</Text>
           <View style={styles.headerSpacer} />
         </View>
 
         <View style={styles.placeSelector}>
-          <Text style={styles.placeLabel}>Choose a place</Text>
+          <Text style={styles.placeLabel}>{t('walk.choosePlace')}</Text>
           <View style={styles.placeRow}>
             {PLACES.map((id) => (
               <Pressable
@@ -125,7 +127,7 @@ export default function WalkScreen() {
                     selectedPlace === id && styles.placeNameSelected,
                   ]}
                 >
-                  {PLACE_DEFS[id].name}
+                  {t(getPlaceNameKey(id))}
                 </Text>
               </Pressable>
             ))}

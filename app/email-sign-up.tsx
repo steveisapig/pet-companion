@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAuth } from '@/providers/AuthProvider';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -22,6 +23,7 @@ const MIN_PASSWORD_LEN = 6;
 
 export default function EmailSignUpScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { signUpWithEmail } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,13 +34,13 @@ export default function EmailSignUpScreen() {
 
   const validate = (): string | null => {
     if (!EMAIL_RE.test(email.trim())) {
-      return 'Enter a valid email address.';
+      return t('auth.emailSignUp.validationEmail');
     }
     if (password.length < MIN_PASSWORD_LEN) {
-      return `Password must be at least ${MIN_PASSWORD_LEN} characters.`;
+      return t('auth.emailSignUp.validationPassword', { count: MIN_PASSWORD_LEN });
     }
     if (password !== confirmPassword) {
-      return 'Passwords do not match.';
+      return t('auth.emailSignUp.validationPasswordMismatch');
     }
     return null;
   };
@@ -55,14 +57,12 @@ export default function EmailSignUpScreen() {
     try {
       const { needsEmailConfirmation } = await signUpWithEmail(email, password);
       if (needsEmailConfirmation) {
-        setSuccessMessage(
-          'Check your email for a confirmation link. After confirming, use Sign in with email on the login screen.'
-        );
+        setSuccessMessage(t('auth.emailSignUp.successConfirmEmail'));
       } else {
         router.replace('/');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign up failed');
+      setError(e instanceof Error ? e.message : t('auth.emailSignUp.failed'));
     } finally {
       setLoading(false);
     }
@@ -99,12 +99,12 @@ export default function EmailSignUpScreen() {
             <Pressable style={styles.backBtn} onPress={goBack} hitSlop={12}>
               <ChevronLeft size={26} color={Colors.darkBrown} />
             </Pressable>
-            <Text style={styles.topBarTitle}>Sign up</Text>
+            <Text style={styles.topBarTitle}>{t('auth.emailSignUp.title')}</Text>
             <View style={styles.topBarSpacer} />
           </View>
 
           <Text style={styles.screenSubtitle}>
-            Create an account with your email and password
+            {t('auth.emailSignUp.subtitle')}
           </Text>
 
           {error && (
@@ -119,7 +119,7 @@ export default function EmailSignUpScreen() {
                 style={styles.afterSuccessBtn}
                 onPress={() => router.replace('/email-auth')}
               >
-                <Text style={styles.afterSuccessBtnText}>Go to email sign in</Text>
+                <Text style={styles.afterSuccessBtnText}>{t('auth.emailSignUp.goToEmailSignIn')}</Text>
               </Pressable>
             </View>
           )}
@@ -127,7 +127,7 @@ export default function EmailSignUpScreen() {
           {!successMessage && (
             <View style={styles.form}>
               <View style={styles.field}>
-                <Text style={styles.label}>Email</Text>
+                <Text style={styles.label}>{t('auth.emailSignUp.email')}</Text>
                 <TextInput
                   style={styles.input}
                   value={email}
@@ -142,12 +142,12 @@ export default function EmailSignUpScreen() {
                 />
               </View>
               <View style={styles.field}>
-                <Text style={styles.label}>Password</Text>
+                <Text style={styles.label}>{t('auth.emailSignUp.password')}</Text>
                 <TextInput
                   style={styles.input}
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="At least 6 characters"
+                  placeholder={t('auth.emailSignUp.passwordPlaceholder', { count: MIN_PASSWORD_LEN })}
                   placeholderTextColor={Colors.gray}
                   secureTextEntry
                   autoCapitalize="none"
@@ -156,12 +156,12 @@ export default function EmailSignUpScreen() {
                 />
               </View>
               <View style={styles.field}>
-                <Text style={styles.label}>Confirm password</Text>
+                <Text style={styles.label}>{t('auth.emailSignUp.confirmPassword')}</Text>
                 <TextInput
                   style={styles.input}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
-                  placeholder="Repeat password"
+                  placeholder={t('auth.emailSignUp.confirmPasswordPlaceholder')}
                   placeholderTextColor={Colors.gray}
                   secureTextEntry
                   autoCapitalize="none"
@@ -177,13 +177,13 @@ export default function EmailSignUpScreen() {
                 {loading ? (
                   <ActivityIndicator color="#FFF" />
                 ) : (
-                  <Text style={styles.primaryBtnText}>Create account</Text>
+                  <Text style={styles.primaryBtnText}>{t('auth.emailSignUp.submit')}</Text>
                 )}
               </Pressable>
             </View>
           )}
 
-          <Text style={styles.hint}>Your account is stored securely with Supabase Auth.</Text>
+          <Text style={styles.hint}>{t('auth.emailSignUp.hint')}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

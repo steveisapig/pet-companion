@@ -17,14 +17,16 @@ import * as Haptics from 'expo-haptics';
 import { ChevronRight, Sparkles } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useOnboarding } from '@/providers/OnboardingProvider';
-import { PET_CONFIGS, PetType } from '@/constants/pets';
+import { getPetDescriptionKey, PET_CONFIGS, PetType } from '@/constants/pets';
 import { usePet } from '@/providers/PetProvider';
 
 const petTypes: PetType[] = ['mochi', 'nugget', 'cookie'];
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { selectPet } = usePet();
   const { startOnboarding } = useOnboarding();
   const [selectedPet, setSelectedPet] = useState<PetType>('mochi');
@@ -110,10 +112,10 @@ export default function OnboardingScreen() {
                 <View style={styles.header}>
                   <View style={styles.sparkleRow}>
                     <Sparkles size={20} color={Colors.softOrange} />
-                    <Text style={styles.subtitle}>CHOOSE YOUR COMPANION</Text>
+                    <Text style={styles.subtitle}>{t('onboarding.chooseCompanion')}</Text>
                     <Sparkles size={20} color={Colors.softOrange} />
                   </View>
-                  <Text style={styles.title}>Who will be{"\n"}your friend?</Text>
+                  <Text style={styles.title}>{t('onboarding.whoWillBeYourFriend')}</Text>
                 </View>
 
                 <View style={styles.cardsContainer}>
@@ -139,11 +141,11 @@ export default function OnboardingScreen() {
                           </View>
                           <View style={styles.petTextColumn}>
                             <Text style={styles.petName}>{pet.name}</Text>
-                            <Text style={styles.petDesc}>{pet.description}</Text>
+                            <Text style={styles.petDesc}>{t(getPetDescriptionKey(type))}</Text>
                           </View>
                           {isSelected && (
                             <View style={[styles.selectedBadge, { backgroundColor: pet.accentColor }]}>
-                              <Text style={styles.selectedBadgeText}>Selected</Text>
+                              <Text style={styles.selectedBadgeText}>{t('onboarding.selected')}</Text>
                             </View>
                           )}
                         </Pressable>
@@ -158,7 +160,7 @@ export default function OnboardingScreen() {
                     onPress={handleContinue}
                     testID="continue-button"
                   >
-                    <Text style={styles.continueBtnText}>Continue</Text>
+                    <Text style={styles.continueBtnText}>{t('onboarding.continue')}</Text>
                     <ChevronRight size={20} color="#FFF" />
                   </Pressable>
                 </Animated.View>
@@ -169,8 +171,8 @@ export default function OnboardingScreen() {
                   <View style={styles.nameStepImageWrap}>
                     <Image source={config.image} style={styles.nameStepImage} resizeMode="contain" />
                   </View>
-                  <Text style={styles.title}>Name your pet</Text>
-                  <Text style={styles.nameSubtitle}>Give your new friend a special name</Text>
+                  <Text style={styles.title}>{t('onboarding.nameYourPet')}</Text>
+                  <Text style={styles.nameSubtitle}>{t('onboarding.nameSubtitle')}</Text>
                 </View>
 
                 <View style={styles.nameInputWrap}>
@@ -192,7 +194,7 @@ export default function OnboardingScreen() {
                     onPress={handleFinish}
                     testID="finish-button"
                   >
-                    <Text style={styles.continueBtnText}>{"Let's Go!"}</Text>
+                    <Text style={styles.continueBtnText}>{t('onboarding.letsGo')}</Text>
                     <Sparkles size={20} color="#FFF" />
                   </Pressable>
                 </Animated.View>

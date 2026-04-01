@@ -5,7 +5,6 @@ export type PhotoRatingTier = 'little' | 'like' | 'love';
 export interface PhotoRatingResult {
   score: number;
   tier: PhotoRatingTier;
-  message: string;
 }
 
 /** Distinct nutrients the analyzer can return (same universe as badges). */
@@ -24,19 +23,16 @@ export function photoRatingFromNutrientCount(nutrientCount: number): PhotoRating
     return {
       score,
       tier: 'little',
-      message: 'likes it a little',
     };
   }
   if (score <= 6) {
     return {
       score,
       tier: 'like',
-      message: 'likes it',
     };
   }
   return {
     score,
     tier: 'love',
-    message: 'is very happy',
   };
 }

@@ -21,6 +21,7 @@ import { statusCodes } from '@react-native-google-signin/google-signin';
 import Colors from '@/constants/colors';
 import { PET_CONFIGS } from '@/constants/pets';
 import { isAppleSignInCancelled } from '@/lib/auth-native';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAuth } from '@/providers/AuthProvider';
 import { checkSupabaseAuthHealth } from '@/lib/supabase-health';
 
@@ -129,6 +130,7 @@ function GoogleLogoColor({ size = 22 }: { size?: number }) {
 
 export default function SignInScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const { signInWithGoogle, signInWithApple, signInWithDev } = useAuth();
   const [loading, setLoading] = useState<'google' | 'apple' | 'dev' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +153,7 @@ export default function SignInScreen() {
       const result = await fn();
       if (result !== false) router.replace('/');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign in failed');
+      setError(e instanceof Error ? e.message : t('auth.signIn.failed'));
     } finally {
       setLoading(null);
     }
@@ -167,13 +169,13 @@ export default function SignInScreen() {
         <View style={[styles.content, { paddingTop: insets.top + 40 }]}>
           <Text style={styles.title}>Marumimi</Text>
           <Text style={styles.subtitle}>
-            Supabase is not configured. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to .env
+            {t('auth.signIn.noSupabase')}
           </Text>
           <Pressable
             style={styles.guestBtn}
             onPress={() => router.replace('/')}
           >
-            <Text style={styles.guestBtnText}>Continue without sync</Text>
+            <Text style={styles.guestBtnText}>{t('auth.signIn.continueWithoutSync')}</Text>
           </Pressable>
         </View>
       </View>
@@ -198,7 +200,7 @@ export default function SignInScreen() {
           <PetHeaderCarousel />
           <Text style={styles.title}>Marumimi</Text>
           <Text style={styles.subtitle}>
-            Sign in to access your virtual pet
+            {t('auth.signIn.subtitle')}
           </Text>
         </View>
 
@@ -223,9 +225,9 @@ export default function SignInScreen() {
                   if (err?.code === statusCodes.IN_PROGRESS) {
                     // sign-in in progress
                   } else if (err?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-                    setError('Play services not available or outdated');
+                    setError(t('auth.signIn.playServicesUnavailable'));
                   } else {
-                    setError(e instanceof Error ? e.message : 'Sign in failed');
+                    setError(e instanceof Error ? e.message : t('auth.signIn.failed'));
                   }
                 } finally {
                   setLoading(null);
@@ -238,7 +240,7 @@ export default function SignInScreen() {
               ) : (
                 <>
                   <GoogleLogoColor size={22} />
-                  <Text style={styles.oauthBtnText}>Sign in with Google</Text>
+                  <Text style={styles.oauthBtnText}>{t('auth.signIn.withGoogle')}</Text>
                 </>
               )}
             </Pressable>
@@ -257,7 +259,7 @@ export default function SignInScreen() {
                   if (isAppleSignInCancelled(e)) {
                     return;
                   }
-                  setError(e instanceof Error ? e.message : 'Sign in failed');
+                  setError(e instanceof Error ? e.message : t('auth.signIn.failed'));
                 } finally {
                   setLoading(null);
                 }
@@ -270,7 +272,7 @@ export default function SignInScreen() {
               ) : (
                 <>
                   <Ionicons name="logo-apple" size={22} color="#FFF" />
-                  <Text style={styles.appleBtnText}>Sign in with Apple</Text>
+                  <Text style={styles.appleBtnText}>{t('auth.signIn.withApple')}</Text>
                 </>
               )}
             </Pressable>
@@ -283,7 +285,7 @@ export default function SignInScreen() {
             testID="sign-in-email-button"
           >
             <Mail size={20} color={Colors.softOrange} />
-            <Text style={styles.emailOptionBtnText}>Sign in with email</Text>
+            <Text style={styles.emailOptionBtnText}>{t('auth.signIn.withEmail')}</Text>
           </Pressable>
 
           {(__DEV__ || process.env.EXPO_PUBLIC_ENABLE_DEV_LOGIN === 'true') && (
@@ -295,7 +297,7 @@ export default function SignInScreen() {
               {loading === 'dev' ? (
                 <ActivityIndicator color="#666" />
               ) : (
-                <Text style={styles.devBtnText}>Dev login ({TEST_USER_EMAIL})</Text>
+                <Text style={styles.devBtnText}>{t('auth.signIn.devLogin', { email: TEST_USER_EMAIL })}</Text>
               )}
             </Pressable>
           )}
@@ -307,13 +309,13 @@ export default function SignInScreen() {
           hitSlop={12}
         >
           <Text style={styles.signUpLinkText}>
-            Need an account?{' '}
-            <Text style={styles.signUpLinkEmphasis}>Sign up</Text>
+            {t('auth.signIn.needAccountPrefix')}
+            <Text style={styles.signUpLinkEmphasis}>{t('auth.signIn.signUp')}</Text>
           </Text>
         </Pressable>
 
         <Text style={styles.hint}>
-          Sign in with an existing account above, or create one with Sign up.
+          {t('auth.signIn.hint')}
         </Text>
       </ScrollView>
     </View>

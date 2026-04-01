@@ -2,15 +2,17 @@ import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 
 export default function NotFoundScreen() {
+  const { t } = useAppTranslation();
   return (
     <View style={styles.container}>
       <Text style={styles.emoji}>🐾</Text>
-      <Text style={styles.title}>Oops!</Text>
-      <Text style={styles.subtitle}>This page doesn't exist</Text>
+      <Text style={styles.title}>{t('notFound.title')}</Text>
+      <Text style={styles.subtitle}>{t('notFound.subtitle')}</Text>
       <Pressable style={styles.button} onPress={() => router.replace('/sign-in')}>
-        <Text style={styles.buttonText}>Go Home</Text>
+        <Text style={styles.buttonText}>{t('notFound.goHome')}</Text>
       </Pressable>
     </View>
   );

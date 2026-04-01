@@ -3,6 +3,8 @@
  * does not treat a type-only import as a hard dependency edge that breaks some setups.
  */
 
+import { i18n, initializeI18n } from '@/lib/i18n';
+
 let Notifications: any = null;
 
 try {
@@ -23,18 +25,18 @@ try {
 const NOTIFICATION_THRESHOLDS = [
   {
     happiness: 50,
-    title: (name: string) => `${name} is getting hungry 🍽️`,
-    body: () => 'Snap a meal photo to keep your pet happy!',
+    title: (name: string) => i18n.t('notifications.hungryTitle', { name }),
+    body: () => i18n.t('notifications.hungryBody'),
   },
   {
     happiness: 30,
-    title: (name: string) => `${name} is lonely... 😕`,
-    body: () => "Your pet hasn't eaten in a while. Share a meal!",
+    title: (name: string) => i18n.t('notifications.lonelyTitle', { name }),
+    body: () => i18n.t('notifications.lonelyBody'),
   },
   {
     happiness: 15,
-    title: (name: string) => `${name} needs you! 😢`,
-    body: () => 'Your pet is really sad. Come back and share a photo!',
+    title: (name: string) => i18n.t('notifications.needsYouTitle', { name }),
+    body: () => i18n.t('notifications.needsYouBody'),
   },
 ];
 
@@ -56,9 +58,10 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 export async function scheduleHappinessNotifications(petName: string, currentHappiness: number) {
   if (!Notifications) return;
   try {
+    await initializeI18n();
     await Notifications.cancelAllScheduledNotificationsAsync();
 
-    const name = petName || 'Your pet';
+    const name = petName || i18n.t('notifications.fallbackPetName');
     const now = Date.now();
     const DATE = Notifications.SchedulableTriggerInputTypes?.DATE ?? 'date';
 

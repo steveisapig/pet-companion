@@ -24,15 +24,17 @@ import {
   LogOut,
   Package,
   RotateCcw,
+  Settings,
 } from 'lucide-react-native';
 import Colors from '@/constants/colors';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
   aggregateDailyNutrition,
   DAILY_CALORIE_GOAL_KCAL,
   formatNutrientChip,
 } from '@/lib/daily-nutrition';
 import { getPetPhotosForLocalCalendarDay } from '@/lib/supabase-photos';
-import { PET_CONFIGS, MOOD_CONFIG, getPetImageForMood } from '@/constants/pets';
+import { getMoodLabelKey, PET_CONFIGS, MOOD_CONFIG, getPetImageForMood } from '@/constants/pets';
 import { useOnboarding } from '@/providers/OnboardingProvider';
 import { usePet } from '@/providers/PetProvider';
 import { useAuth } from '@/providers/AuthProvider';
@@ -126,6 +128,7 @@ const REACTIONS = ['💕', '⭐', '🎵', '✨', '💖', '🌟'];
 
 export default function PetScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation();
   const {
     petType, petName, happiness, mood, userId,
     level, expProgress, justLeveledUp, clearLevelUp,
@@ -295,6 +298,12 @@ export default function PetScreen() {
     router.replace('/sign-in');
   }, [signOut]);
 
+  const handleSettings = useCallback(async () => {
+    setMenuOpen(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push('/settings');
+  }, []);
+
   const dismissLevelUp = useCallback(() => {
     Animated.timing(levelUpOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
       clearLevelUp();
@@ -386,7 +395,7 @@ export default function PetScreen() {
             </Pressable>
             <View style={styles.nameTag}>
               <Text style={styles.petNameText}>{petName}</Text>
-              <Text style={styles.moodText}>{moodConfig.emoji} {moodConfig.label}</Text>
+              <Text style={styles.moodText}>{moodConfig.emoji} {t(getMoodLabelKey(mood))}</Text>
             </View>
           </View>
           <View style={styles.statsRow}>
@@ -394,13 +403,13 @@ export default function PetScreen() {
               <Images size={18} color="#FFF" />
             </Pressable>
             <View style={[styles.statBadge, styles.levelBadge]}>
-              <Text style={styles.levelText}>Lv {level}</Text>
+              <Text style={styles.levelText}>{t('pet.levelShort', { level: String(level) })}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.barSection}>
-          <Text style={styles.barLabel}>Experience (to next level)</Text>
+          <Text style={styles.barLabel}>{t('pet.experienceToNextLevel')}</Text>
           <View style={styles.xpBarContainer}>
             <View style={styles.xpBarBg}>
               <Animated.View
@@ -412,7 +421,7 @@ export default function PetScreen() {
         </View>
 
         <View style={styles.barSection}>
-          <Text style={styles.barLabel}>Happiness</Text>
+          <Text style={styles.barLabel}>{t('pet.happiness')}</Text>
           <View style={styles.happinessBarContainer}>
             <View style={styles.happinessBarBg}>
               <Animated.View
@@ -431,7 +440,8 @@ export default function PetScreen() {
 
         {userId && hasSupabaseConfig() && (
           <View style={styles.barSection}>
-            <Text style={styles.barLabel}>Today&apos;s nutrition</Text>
+            <Text style={styles.barLabel}>{t('pet.todayNutrition')}</Text>
+            <Text style={styles.dailySectionHint}>{t('pet.todayNutritionHint')}</Text>
             {todayPhotosLoading ? (
               <ActivityIndicator size="small" color={Colors.softOrange} style={styles.dailyLoading} />
             ) : (
@@ -441,7 +451,9 @@ export default function PetScreen() {
                     {dailyNutrition.totalCalories} / {DAILY_CALORIE_GOAL_KCAL} kcal
                   </Text>
                   <Text style={styles.dailyCalSub}>
-                    {Math.max(0, DAILY_CALORIE_GOAL_KCAL - dailyNutrition.totalCalories)} kcal remaining
+                    {t('pet.caloriesRemaining', {
+                      count: Math.max(0, DAILY_CALORIE_GOAL_KCAL - dailyNutrition.totalCalories),
+                    })}
                   </Text>
                 </View>
                 {dailyNutrition.nutrientItemTypesToday.length > 0 ? (
@@ -459,7 +471,7 @@ export default function PetScreen() {
                   </View>
                 ) : (
                   <Text style={styles.dailyMuted}>
-                    Log food photos with &quot;Share a Moment&quot; to track nutrients and calories for today.
+                    {t('pet.nutritionEmpty')}
                   </Text>
                 )}
               </>
@@ -515,9 +527,11 @@ export default function PetScreen() {
           <View style={styles.shadowEllipse} />
 
           <Text style={styles.tapHint}>
-            {mood === 'miserable' ? 'Your pet needs attention...' :
-             mood === 'sad' ? 'Tap to cheer up your friend!' :
-             'Tap to play!'}
+            {mood === 'miserable'
+              ? t('pet.tapHint.miserable')
+              : mood === 'sad'
+                ? t('pet.tapHint.sad')
+                : t('pet.tapHint.default')}
           </Text>
         </View>
 
@@ -534,9 +548,9 @@ export default function PetScreen() {
                 ]}
               >
                 <Text style={styles.levelUpEmoji}>🎉</Text>
-                <Text style={styles.levelUpTitle}>Level Up!</Text>
-                <Text style={styles.levelUpSubtitle}>Your pet reached Level {level}!</Text>
-                <Text style={styles.levelUpTap}>Tap to continue</Text>
+                <Text style={styles.levelUpTitle}>{t('pet.levelUpTitle')}</Text>
+                <Text style={styles.levelUpSubtitle}>{t('pet.levelUpSubtitle', { level: String(level) })}</Text>
+                <Text style={styles.levelUpTap}>{t('pet.tapToContinue')}</Text>
               </Animated.View>
             </Pressable>
           </Modal>
@@ -547,21 +561,27 @@ export default function PetScreen() {
             <View style={[styles.menuPanel, { top: insets.top + 50 }]}>
               <Pressable style={styles.menuItem} onPress={handleInventory}>
                 <Package size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>Badges</Text>
+                <Text style={styles.menuItemText}>{t('pet.menu.badges')}</Text>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={handleStreak}>
                 <Flame size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>Streak</Text>
+                <Text style={styles.menuItemText}>{t('pet.menu.streak')}</Text>
+              </Pressable>
+              <Pressable style={styles.menuItem} onPress={handleSettings}>
+                <Settings size={20} color={Colors.darkBrown} />
+                <Text style={styles.menuItemText}>
+                  {t('pet.menu.settings', { defaultValue: 'Settings' })}
+                </Text>
               </Pressable>
               {__DEV__ && (
                 <Pressable style={styles.menuItem} onPress={handleRestartOnboardingDev} testID="dev-restart-onboarding">
                   <RotateCcw size={20} color={Colors.darkBrown} />
-                  <Text style={styles.menuItemText}>Replay onboarding tips</Text>
+                  <Text style={styles.menuItemText}>{t('pet.menu.replayOnboarding')}</Text>
                 </Pressable>
               )}
               <Pressable style={styles.menuItem} onPress={handleLogOut}>
                 <LogOut size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>Log out</Text>
+                <Text style={styles.menuItemText}>{t('pet.menu.logOut')}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -574,7 +594,7 @@ export default function PetScreen() {
             testID="camera-button"
           >
             <Camera size={24} color="#FFF" />
-            <Text style={styles.actionBtnText}>Share a Moment</Text>
+            <Text style={styles.actionBtnText}>{t('pet.ctaShareMoment')}</Text>
           </Pressable>
         </View>
 
@@ -608,17 +628,17 @@ export default function PetScreen() {
               </Text>
               <Text style={styles.onboardingTitle}>
                 {onboardingStep === 0
-                  ? 'Share a photo with your pet!'
+                  ? t('pet.onboarding.shareTitle')
                   : onboardingStep === 1
-                    ? 'Browse your photo album'
-                    : 'Collect nutrient badges'}
+                    ? t('pet.onboarding.albumTitle')
+                    : t('pet.onboarding.badgesTitle')}
               </Text>
               <Text style={styles.onboardingHint}>
                 {onboardingStep === 0
-                  ? 'Tap the button below'
+                  ? t('pet.onboarding.shareHint')
                   : onboardingStep === 1
-                    ? 'Tap the gallery icon (top right)'
-                    : 'Open the menu (☰) and tap Badges'}
+                    ? t('pet.onboarding.albumHint')
+                    : t('pet.onboarding.badgesHint')}
               </Text>
             </View>
 
@@ -816,6 +836,13 @@ const styles = StyleSheet.create({
     color: Colors.brown,
     marginBottom: 4,
     opacity: 0.9,
+  },
+  dailySectionHint: {
+    fontSize: 12,
+    color: Colors.brown,
+    opacity: 0.78,
+    marginBottom: 8,
+    lineHeight: 16,
   },
   xpBarContainer: {
     flexDirection: 'row' as const,
