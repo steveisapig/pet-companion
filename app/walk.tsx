@@ -14,7 +14,7 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
-import { PET_CONFIGS } from '@/constants/pets';
+import { PET_CONFIGS, getPetImageForMood } from '@/constants/pets';
 import { PLACE_DEFS, type PlaceId } from '@/constants/items';
 import { WALK_NUTRIENTS, formatNutrientName, getNutrientEmoji } from '@/constants/badges';
 import { usePet } from '@/providers/PetProvider';
@@ -27,7 +27,7 @@ const PLACES: PlaceId[] = ['park', 'beach', 'forest', 'city', 'garden'];
 
 export default function WalkScreen() {
   const insets = useSafeAreaInsets();
-  const { petType, level, addBadges } = usePet();
+  const { petType, level, mood, addBadges } = usePet();
   const [selectedPlace, setSelectedPlace] = useState<PlaceId>('park');
   const [foundBadge, setFoundBadge] = useState<{ emoji: string; name: string; isFound: boolean } | null>(null);
   const foundBannerOpacity = useRef(new Animated.Value(1)).current;
@@ -175,7 +175,7 @@ export default function WalkScreen() {
                 },
               ]}
             >
-              <Image source={config.image} style={styles.petImage} resizeMode="contain" />
+              <Image source={getPetImageForMood(config, mood)} style={styles.petImage} resizeMode="contain" />
             </Animated.View>
 
           {foundBadge && (

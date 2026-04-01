@@ -29,7 +29,8 @@
         ],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
-        }
+        },
+        "NSCameraUsageDescription": "Marumimi uses the camera only when you take a photo to share with your pet. We analyze food images for nutrients and calories so you can earn badges and keep your nutrition streak."
       }
     },
     "android": {
@@ -51,6 +52,13 @@
       "expo-font",
       "expo-sqlite",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Marumimi uses the camera only when you take a photo to share with your pet. We analyze food images for nutrients and calories so you can earn badges and keep your nutrition streak.",
+          "photosPermission": "Marumimi needs photo library access so you can pick images to share with your pet and save album photos."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
@@ -58,6 +66,7 @@
           "iosDisplayInForeground": true
         }
       ],
+      "expo-apple-authentication",
       [
         "@react-native-google-signin/google-signin",
         {

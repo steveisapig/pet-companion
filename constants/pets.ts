@@ -7,6 +7,8 @@ export interface PetConfig {
   name: string;
   description: string;
   image: any;
+  /** Shown when mood is sad / miserable; omit if no separate asset (e.g. Nugget) */
+  imageSad?: any;
   color: string;
   accentColor: string;
 }
@@ -17,6 +19,7 @@ export const PET_CONFIGS: Record<PetType, PetConfig> = {
     name: 'Mochi',
     description: 'A soft, squishy little friend who loves cuddles',
     image: require('@/assets/images/pet-mochi.png'),
+    imageSad: require('@/assets/images/sad-mochi.png'),
     color: '#FFF8F0',
     accentColor: '#D4A574',
   },
@@ -33,10 +36,19 @@ export const PET_CONFIGS: Record<PetType, PetConfig> = {
     name: 'Cookie',
     description: 'A sweet adventurer who always finds treats',
     image: require('@/assets/images/pet-cookie.png'),
+    imageSad: require('@/assets/images/sad-cookie.png'),
     color: '#FFF8F0',
     accentColor: '#8D6E63',
   },
 };
+
+/** Pet portrait for the current mood; use `imageSad` when present for sad / miserable. */
+export function getPetImageForMood(config: PetConfig, mood: MoodLevel): any {
+  if ((mood === 'sad' || mood === 'miserable') && config.imageSad != null) {
+    return config.imageSad;
+  }
+  return config.image;
+}
 
 export const MOOD_CONFIG: Record<MoodLevel, { emoji: string; label: string; color: string }> = {
   ecstatic: { emoji: '✨', label: 'Ecstatic!', color: '#FFD700' },

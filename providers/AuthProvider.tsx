@@ -4,7 +4,7 @@ import * as ExpoLinking from 'expo-linking';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Platform, Linking } from 'react-native';
 import { createSessionFromUrl } from '@/lib/auth-oauth';
-import { signInWithGoogleNative, signInWithAppleNative } from '@/lib/auth-native';
+import { signInWithGoogleNative, signInWithAppleNative, isAppleSignInCancelled } from '@/lib/auth-native';
 
 export interface AuthState {
   user: User | null;
@@ -120,6 +120,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       await signInWithAppleNative();
     } catch (e) {
+      if (isAppleSignInCancelled(e)) {
+        throw e;
+      }
       console.error('[Auth] Apple sign in error:', e);
       throw e;
     }

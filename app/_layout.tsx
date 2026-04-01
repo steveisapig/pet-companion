@@ -2,13 +2,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { LogBox } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+
+// Stale AsyncStorage session: GoTrue logs then clears the session; not actionable in dev UI.
+if (__DEV__) {
+  LogBox.ignoreLogs([
+    "Invalid Refresh Token: Refresh Token Not Found",
+    "AuthApiError: Invalid Refresh Token: Refresh Token Not Found",
+  ]);
+}
 import { AuthProvider } from "@/providers/AuthProvider";
 import { OnboardingProvider } from "@/providers/OnboardingProvider";
 import { PetProvider } from "@/providers/PetProvider";
-import { setupNotificationHandler } from "@/lib/notifications";
-
-setupNotificationHandler();
+import { NotificationsProvider } from "@/providers/NotificationsProvider";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -25,6 +32,7 @@ function RootLayoutNav() {
       <Stack.Screen name="pet" />
       <Stack.Screen name="walk" />
       <Stack.Screen name="inventory" />
+      <Stack.Screen name="streak" />
       <Stack.Screen name="camera" options={{ presentation: "modal" }} />
       <Stack.Screen name="album" />
     </Stack>
@@ -55,9 +63,11 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <AuthProvider>
           <PetProvider>
-            <OnboardingProvider>
-              <RootLayoutNav />
-            </OnboardingProvider>
+            <NotificationsProvider>
+              <OnboardingProvider>
+                <RootLayoutNav />
+              </OnboardingProvider>
+            </NotificationsProvider>
           </PetProvider>
         </AuthProvider>
       </GestureHandlerRootView>

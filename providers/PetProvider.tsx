@@ -1,5 +1,4 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import createContextHook from '@nkzw/create-context-hook';
 import {
@@ -24,11 +23,6 @@ import {
   type Badges,
 } from '@/lib/badges';
 import { useAuth } from '@/providers/AuthProvider';
-import {
-  requestNotificationPermissions,
-  scheduleHappinessNotifications,
-  cancelAllNotifications,
-} from '@/lib/notifications';
 
 interface PetState extends Omit<PetServiceState, 'userId'> {
   userId: string | null;
@@ -103,30 +97,6 @@ export const [PetProvider, usePet] = createContextHook(() => {
       setBadges(badgesQuery.data);
     }
   }, [badgesQuery.data]);
-
-  // Request notification permissions once onboarding completes
-  const permissionsRequestedRef = useRef(false);
-  useEffect(() => {
-    if (!petState.onboardingComplete || permissionsRequestedRef.current) return;
-    permissionsRequestedRef.current = true;
-    requestNotificationPermissions();
-  }, [petState.onboardingComplete]);
-
-  // Schedule/cancel notifications when app moves to background/foreground
-  useEffect(() => {
-    if (!petState.onboardingComplete) return;
-
-    const handleAppStateChange = (nextState: AppStateStatus) => {
-      if (nextState === 'background' || nextState === 'inactive') {
-        scheduleHappinessNotifications(petState.petName, petState.happiness);
-      } else if (nextState === 'active') {
-        cancelAllNotifications();
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
-  }, [petState.onboardingComplete, petState.petName, petState.happiness]);
 
   useEffect(() => {
     if (!petState.onboardingComplete) return;
@@ -233,6 +203,14 @@ export const [PetProvider, usePet] = createContextHook(() => {
   const mood = getMoodFromHappiness(petState.happiness);
   const isLoading = stateQuery.isLoading;
 
+  // Get top nutrient badge for sharing
+  const topNutrientBadge = Object.entries(badges)
+    .map(([itemTypeStr, count]) => ({
+      itemType: parseInt(itemTypeStr, 10),
+      count,
+    }))
+    .sort((a, b) => b.count - a.count)[0] ?? null;
+
   return {
     petType: petState.petType,
     petName: petState.petName,
@@ -249,6 +227,7 @@ export const [PetProvider, usePet] = createContextHook(() => {
     onboardingComplete: petState.onboardingComplete,
     isLoading,
     badges,
+    topNutrientBadge,
     addBadges,
     selectPet,
     addPhoto,

@@ -16,9 +16,9 @@ import * as Haptics from 'expo-haptics';
 import { Camera, ImagePlus, X, Check, Sparkles } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
-import { PET_CONFIGS } from '@/constants/pets';
+import { PET_CONFIGS, getPetImageForMood } from '@/constants/pets';
 import { formatNutrientName, getNutrientEmoji } from '@/constants/badges';
-import { rollPhotoRating } from '@/lib/photo-rating';
+import { photoRatingFromNutrientCount } from '@/lib/photo-rating';
 import { analyzePhoto } from '@/lib/analyze-photo';
 import {
   countUserLlmQueriesLast24h,
@@ -28,13 +28,14 @@ import {
 import { usePet } from '@/providers/PetProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { uploadPetPhoto } from '@/lib/supabase-photos';
+import { recordStreakDayIfPhotoUploaded } from '@/lib/user-streak';
 
 const hasSupabaseConfig = () =>
   !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
 
 export default function CameraScreen() {
   const insets = useSafeAreaInsets();
-  const { addPhoto, petName, petType, userId, addBadges } = usePet();
+  const { addPhoto, petName, petType, mood, userId, addBadges } = usePet();
   const { user, session } = useAuth();
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -80,7 +81,10 @@ export default function CameraScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Camera access is required to take photos for your pet.');
+        Alert.alert(
+          'Permission needed',
+          'Allow camera access to take photos you share with your pet. Photos with food will be analyzed for nutrients and calories.'
+        );
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -103,7 +107,7 @@ export default function CameraScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: false,
-        quality: 0.92,
+        quality: 0.75,
       });
       if (!result.canceled && result.assets[0]) {
         console.log('[Camera] Image picked:', result.assets[0].uri);
@@ -116,9 +120,8 @@ export default function CameraScreen() {
   }, []);
 
   const handleConfirm = useCallback(async () => {
-    const rating = rollPhotoRating();
-
     if (!capturedUri) {
+      const rating = photoRatingFromNutrientCount(0);
       addPhoto();
       setPhotoResult({ score: rating.score, message: rating.message, nutrients: [], calorie: 0 });
       setShowSuccess(true);
@@ -129,13 +132,13 @@ export default function CameraScreen() {
           Animated.spring(bounceAnim, { toValue: 0, friction: 3, tension: 200, useNativeDriver: true }),
         ]),
       ]).start();
-      setTimeout(() => router.back(), 2200);
       return;
     }
 
     setIsAnalyzing(true);
     let nutrients: string[] = [];
     let calorie = 0;
+    let cloudUploadDone = false;
 
     try {
       if (hasSupabaseConfig()) {
@@ -173,10 +176,18 @@ export default function CameraScreen() {
             } else {
               await uploadPetPhoto(capturedUri, userId);
             }
+            cloudUploadDone = true;
           }
         } else if (userId && user?.id === userId) {
           await uploadPetPhoto(capturedUri, userId);
+          cloudUploadDone = true;
         }
+      }
+
+      if (cloudUploadDone && userId) {
+        await recordStreakDayIfPhotoUploaded(userId, new Date()).catch((err) =>
+          console.error('[Camera] streak update:', err)
+        );
       }
     } catch (e) {
       console.error('[Camera] Error uploading photo:', e);
@@ -185,6 +196,7 @@ export default function CameraScreen() {
       setIsAnalyzing(false);
     }
 
+    const rating = photoRatingFromNutrientCount(nutrients.length);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addPhoto();
     setPhotoResult({ score: rating.score, message: rating.message, nutrients, calorie });
@@ -197,11 +209,12 @@ export default function CameraScreen() {
         Animated.spring(bounceAnim, { toValue: 0, friction: 3, tension: 200, useNativeDriver: true }),
       ]),
     ]).start();
-
-    setTimeout(() => {
-      router.back();
-    }, 2200);
   }, [addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session]);
+
+  const handleContinueAfterSuccess = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.back();
+  }, []);
 
   const handleRetake = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -233,7 +246,7 @@ export default function CameraScreen() {
               ]}
             >
               <Image
-                source={petConfig.image}
+                source={getPetImageForMood(petConfig, mood)}
                 style={styles.petSuccessImage}
                 resizeMode="contain"
                 accessibilityLabel={`${petName} is happy`}
@@ -271,6 +284,13 @@ export default function CameraScreen() {
                 </View>
               )}
             </Animated.View>
+            <Pressable
+              style={styles.continueBtn}
+              onPress={handleContinueAfterSuccess}
+              testID="success-continue-button"
+            >
+              <Text style={styles.continueBtnText}>Continue</Text>
+            </Pressable>
           </View>
         ) : capturedUri ? (
           <View style={styles.previewContainer}>
@@ -500,6 +520,26 @@ const styles = StyleSheet.create({
   successContent: {
     alignItems: 'center' as const,
     gap: 16,
+  },
+  continueBtn: {
+    marginTop: 28,
+    alignSelf: 'stretch' as const,
+    backgroundColor: Colors.softOrange,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 18,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    shadowColor: Colors.softOrange,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  continueBtnText: {
+    fontSize: 17,
+    fontWeight: '700' as const,
+    color: '#FFF',
   },
   successTitle: {
     fontSize: 28,
