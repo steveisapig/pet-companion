@@ -9,6 +9,7 @@ import {
   Dimensions,
   Modal,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, router } from 'expo-router';
@@ -26,14 +27,24 @@ import {
   RotateCcw,
   Settings,
 } from 'lucide-react-native';
+import { getNutrientDisplay } from '@/constants/badge-types';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import {
+  analyzeNutritionWindow,
+  getCachedNutritionWindowAnalysis,
+  getLastNutritionAnalysisAt,
+  NUTRITION_ANALYSIS_COOLDOWN_DAYS,
+  NUTRITION_ANALYSIS_DAYS,
+  NUTRITION_ANALYSIS_REQUIRED_PHOTOS,
+  type NutritionWindowAnalysisSuccess,
+} from '@/lib/analyze-nutrition-window';
 import {
   aggregateDailyNutrition,
   DAILY_CALORIE_GOAL_KCAL,
   formatNutrientChip,
 } from '@/lib/daily-nutrition';
-import { getPetPhotosForLocalCalendarDay } from '@/lib/supabase-photos';
+import { getPetPhotosForLocalCalendarDay, getPetPhotosInDateRange } from '@/lib/supabase-photos';
 import { getMoodLabelKey, PET_CONFIGS, MOOD_CONFIG, getPetImageForMood } from '@/constants/pets';
 import { useOnboarding } from '@/providers/OnboardingProvider';
 import { usePet } from '@/providers/PetProvider';
@@ -66,10 +77,16 @@ const ONBOARD_ALBUM_CENTER_X_OFFSET = 56;
 const ONBOARD_CORNER_BTN_RADIUS = 18;
 /** Card ↔ triangle and triangle ↔ target gaps (corner steps) */
 const ONBOARD_GAP_COUPLE = 2;
-/** Horizontal nudge (px) toward screen center — pure X, does not re-slide along the diagonal */
-const ONBOARD_CORNER_TRIANGLE_NUDGE_X = 0;
-/** Vertical nudge (px): positive = lower on screen — pure Y, does not change X */
-const ONBOARD_CORNER_TRIANGLE_NUDGE_Y = 72;
+/** Fixed diagonal offset from the corner target for steps 2–3; yields an exact 45° arrow. */
+const ONBOARD_CORNER_TRIANGLE_OFFSET = 50;
+/** Rotating the down-pointing triangle by ±135° makes the visual arrow exactly 45° diagonally. */
+const ONBOARD_CORNER_TRIANGLE_ROT_DEG = 135;
+/** Step 2 (album) onboarding arrow position tweak. */
+const ONBOARD_STEP1_ARROW_OFFSET_X = 50;
+const ONBOARD_STEP1_ARROW_OFFSET_Y = 20;
+/** Step 3 (menu) onboarding arrow position tweak. */
+const ONBOARD_STEP2_ARROW_OFFSET_X = -24;
+const ONBOARD_STEP2_ARROW_OFFSET_Y = 24;
 
 /** Small down-pointing SVG triangle (rotate for album / menu aim) */
 function OnboardingTriangleDown({ color }: { color: string }) {
@@ -82,12 +99,7 @@ function OnboardingTriangleDown({ color }: { color: string }) {
   );
 }
 
-/**
- * Album / menu tips: place the triangle tip on the line from the button center to the top-center
- * of the white card. Y is clamped so the tip (and unrotated bbox above it) sits strictly *below*
- * the top-bar row (buttons live in 0..TOP_BAR_HIT) and above the white card top — i.e. in the gap
- * between the bar bottom and the card, not on the same row as the icons.
- */
+/** Album / menu tips: place the triangle tip on a fixed 45° diagonal from the target button. */
 function computeCornerOnboardingGuide(
   btnCx: number,
   btnCy: number,
@@ -97,38 +109,68 @@ function computeCornerOnboardingGuide(
   gapBtn: number,
   gapY: number
 ) {
-  const dx = cardCx - btnCx;
-  const dy = cardTopY - btnCy;
-  const len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len;
-  const uy = dy / len;
-  const distAlong = btnRadius + gapBtn;
-  let tipX = btnCx + ux * distAlong;
-  let tipY = btnCy + uy * distAlong;
+  const horizontalDir = Math.sign(cardCx - btnCx) || 1;
+  const baseOffset = btnRadius + gapBtn + ONBOARD_CORNER_TRIANGLE_OFFSET;
+  let tipY = btnCy + baseOffset;
 
   /** Bottom of top-bar row; triangle view uses top = tipY - ONBOARD_TRIANGLE_H, so tipY must be ≥ this */
   const yMinTip = TOP_BAR_HIT + ONBOARD_TRIANGLE_H + gapY;
   const yMaxTip = cardTopY - gapY;
   tipY = Math.max(yMinTip, Math.min(yMaxTip, tipY));
-  if (Math.abs(cardTopY - btnCy) > 1e-6) {
-    const t = (tipY - btnCy) / (cardTopY - btnCy);
-    tipX = btnCx + t * (cardCx - btnCx);
-  }
-  /** Toward card top-center horizontally; +X if button is left of center (menu), −X if right (album) */
-  tipX += Math.sign(cardCx - btnCx) * ONBOARD_CORNER_TRIANGLE_NUDGE_X;
-  tipY += ONBOARD_CORNER_TRIANGLE_NUDGE_Y;
-  tipY = Math.max(yMinTip, Math.min(yMaxTip, tipY));
+  const tipX = btnCx + horizontalDir * (tipY - btnCy);
 
-  const rot =
-    (Math.atan2(btnCy - tipY, btnCx - tipX) * 180) / Math.PI - 90;
+  const rot = horizontalDir > 0 ? ONBOARD_CORNER_TRIANGLE_ROT_DEG : -ONBOARD_CORNER_TRIANGLE_ROT_DEG;
   return { tipX, tipY, rot };
 }
 
 const REACTIONS = ['💕', '⭐', '🎵', '✨', '💖', '🌟'];
 
+function getNutritionAnalysisWindow(now: Date = new Date()) {
+  const start = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - (NUTRITION_ANALYSIS_DAYS - 1),
+    0,
+    0,
+    0,
+    0
+  );
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
+function formatAnalysisTimestamp(timestamp: string): string | null {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(date);
+  } catch {
+    return date.toLocaleString();
+  }
+}
+
+function hasNutritionCooldownElapsed(timestamp?: string | null): boolean {
+  if (!timestamp) return true;
+  const last = new Date(timestamp).getTime();
+  if (Number.isNaN(last)) return true;
+  return Date.now() - last >= NUTRITION_ANALYSIS_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+}
+
 export default function PetScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation();
+  const tLoose = useCallback(
+    (key: string, options?: Record<string, string>) =>
+      String(t(key as never, options as never)),
+    [t]
+  );
+  const nutritionAnalysisWindow = useMemo(() => getNutritionAnalysisWindow(), []);
   const {
     petType, petName, happiness, mood, userId,
     level, expProgress, justLeveledUp, clearLevelUp,
@@ -144,18 +186,44 @@ export default function PetScreen() {
     enabled: !!userId && hasSupabaseConfig(),
     staleTime: 30_000,
   });
+  const {
+    data: recentNutritionPhotos,
+    refetch: refetchRecentNutritionPhotos,
+    isLoading: recentNutritionPhotosLoading,
+  } = useQuery({
+    queryKey: [
+      'petPhotosNutritionWindow',
+      userId,
+      nutritionAnalysisWindow.startIso,
+      nutritionAnalysisWindow.endIso,
+    ],
+    queryFn: () =>
+      getPetPhotosInDateRange(
+        userId!,
+        nutritionAnalysisWindow.startIso,
+        nutritionAnalysisWindow.endIso
+      ),
+    enabled: !!userId && hasSupabaseConfig(),
+    staleTime: 30_000,
+  });
 
   useFocusEffect(
     useCallback(() => {
-      if (userId && hasSupabaseConfig()) refetchTodayPhotos();
-    }, [userId, refetchTodayPhotos])
+      if (userId && hasSupabaseConfig()) {
+        refetchTodayPhotos();
+        refetchRecentNutritionPhotos();
+      }
+    }, [userId, refetchTodayPhotos, refetchRecentNutritionPhotos])
   );
 
   const dailyNutrition = useMemo(
     () => aggregateDailyNutrition(todayPhotos ?? []),
     [todayPhotos]
   );
-  const { signOut } = useAuth();
+  const recentPhotoCount = recentNutritionPhotos?.length ?? 0;
+  const canRunNutritionAnalysis =
+    recentPhotoCount >= NUTRITION_ANALYSIS_REQUIRED_PHOTOS;
+  const { signOut, session } = useAuth();
   const { step: onboardingStep, advanceStep, startOnboarding } = useOnboarding();
 
   const bounceAnim = useRef(new Animated.Value(0)).current;
@@ -166,8 +234,28 @@ export default function PetScreen() {
   const levelUpScale = useRef(new Animated.Value(0)).current;
   const levelUpOpacity = useRef(new Animated.Value(0)).current;
   const onboardingArrowPulse = useRef(new Animated.Value(0)).current;
+  const nutritionFlashAnim = useRef(new Animated.Value(0)).current;
   const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; x: number; anim: Animated.Value }[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [nutritionAnalysisVisible, setNutritionAnalysisVisible] = useState(false);
+  const [nutritionAnalysisLoading, setNutritionAnalysisLoading] = useState(false);
+  const [nutritionAnalysisError, setNutritionAnalysisError] = useState<string | null>(null);
+  const [nutritionAnalysisResult, setNutritionAnalysisResult] =
+    useState<NutritionWindowAnalysisSuccess | null>(null);
+  const [lastNutritionAnalysisAt, setLastNutritionAnalysisAt] = useState<string | null>(null);
+  const latestNutritionAnalysisAt =
+    nutritionAnalysisResult?.analyzedAt ?? lastNutritionAnalysisAt;
+  const nutritionAnalysisTimestamp = useMemo(
+    () =>
+      latestNutritionAnalysisAt
+        ? formatAnalysisTimestamp(latestNutritionAnalysisAt)
+        : null,
+    [latestNutritionAnalysisAt]
+  );
+  const shouldShowFlashyNutritionButton =
+    canRunNutritionAnalysis &&
+    !recentNutritionPhotosLoading &&
+    hasNutritionCooldownElapsed(latestNutritionAnalysisAt);
   const emojiIdRef = useRef(0);
 
   const config = petType ? PET_CONFIGS[petType] : PET_CONFIGS.mochi;
@@ -231,6 +319,90 @@ export default function PetScreen() {
     loop.start();
     return () => loop.stop();
   }, [onboardingStep, onboardingArrowPulse]);
+
+  useEffect(() => {
+    let active = true;
+    if (!userId) {
+      setLastNutritionAnalysisAt(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    getLastNutritionAnalysisAt(userId)
+      .then((timestamp) => {
+        if (!active) return;
+        setLastNutritionAnalysisAt(timestamp);
+      })
+      .catch(() => {
+        if (!active) return;
+        setLastNutritionAnalysisAt(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!userId || !canRunNutritionAnalysis || !recentNutritionPhotos?.length) {
+      setNutritionAnalysisResult(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    getCachedNutritionWindowAnalysis({
+      userId,
+      photos: recentNutritionPhotos,
+      startIso: nutritionAnalysisWindow.startIso,
+      endIso: nutritionAnalysisWindow.endIso,
+    })
+      .then((cached) => {
+        if (!active) return;
+        setNutritionAnalysisResult(cached);
+      })
+      .catch(() => {
+        if (!active) return;
+        setNutritionAnalysisResult(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    userId,
+    canRunNutritionAnalysis,
+    recentNutritionPhotos,
+    nutritionAnalysisWindow.startIso,
+    nutritionAnalysisWindow.endIso,
+  ]);
+
+  useEffect(() => {
+    if (!shouldShowFlashyNutritionButton) {
+      nutritionFlashAnim.setValue(0);
+      return;
+    }
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(nutritionFlashAnim, {
+          toValue: 1,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.timing(nutritionFlashAnim, {
+          toValue: 0,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [shouldShowFlashyNutritionButton, nutritionFlashAnim]);
 
   const spawnEmoji = useCallback((x: number) => {
     const id = emojiIdRef.current++;
@@ -304,6 +476,74 @@ export default function PetScreen() {
     router.push('/settings');
   }, []);
 
+  const closeNutritionAnalysis = useCallback(() => {
+    setNutritionAnalysisVisible(false);
+  }, []);
+
+  const handleNutritionAnalysis = useCallback(async () => {
+    if (!userId || !canRunNutritionAnalysis || !recentNutritionPhotos?.length) return;
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setNutritionAnalysisVisible(true);
+    setNutritionAnalysisLoading(true);
+    setNutritionAnalysisError(null);
+    setNutritionAnalysisResult(null);
+
+    const result = await analyzeNutritionWindow(
+      {
+        userId,
+        photos: recentNutritionPhotos,
+        startIso: nutritionAnalysisWindow.startIso,
+        endIso: nutritionAnalysisWindow.endIso,
+        forceRefresh: shouldShowFlashyNutritionButton,
+      },
+      session?.access_token ?? null
+    );
+
+    setNutritionAnalysisLoading(false);
+
+    if (result.success) {
+      setNutritionAnalysisResult(result);
+      setLastNutritionAnalysisAt(result.analyzedAt);
+      return;
+    }
+
+    if (result.code === 'NOT_ENOUGH_PHOTOS') {
+      setNutritionAnalysisVisible(false);
+      Alert.alert(
+        tLoose('pet.nutritionAnalysis.notReadyTitle'),
+        tLoose('pet.nutritionAnalysis.lockedHint', {
+          count: String(result.requiredPhotos ?? NUTRITION_ANALYSIS_REQUIRED_PHOTOS),
+          days: String(result.days ?? NUTRITION_ANALYSIS_DAYS),
+          remaining: String(
+            Math.max(
+              0,
+              (result.requiredPhotos ?? NUTRITION_ANALYSIS_REQUIRED_PHOTOS) -
+                (result.photoCount ?? recentPhotoCount)
+            )
+          ),
+        })
+      );
+      return;
+    }
+
+    setNutritionAnalysisError(
+      result.code === 'AUTH_REQUIRED'
+        ? tLoose('pet.nutritionAnalysis.signInRequired')
+        : result.raw || tLoose('pet.nutritionAnalysis.errorBody')
+    );
+  }, [
+    canRunNutritionAnalysis,
+    userId,
+    recentNutritionPhotos,
+    nutritionAnalysisWindow.startIso,
+    nutritionAnalysisWindow.endIso,
+    session?.access_token,
+    shouldShowFlashyNutritionButton,
+    tLoose,
+    recentPhotoCount,
+  ]);
+
   const dismissLevelUp = useCallback(() => {
     Animated.timing(levelUpOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
       clearLevelUp();
@@ -351,6 +591,11 @@ export default function PetScreen() {
     ONBOARD_GAP_COUPLE,
     ONBOARD_GAP_COUPLE
   );
+  const onboardAlbumGuideAdjusted = {
+    ...onboardAlbumGuide,
+    tipX: onboardAlbumGuide.tipX + ONBOARD_STEP1_ARROW_OFFSET_X,
+    tipY: onboardAlbumGuide.tipY + ONBOARD_STEP1_ARROW_OFFSET_Y,
+  };
   const onboardMenuGuide = computeCornerOnboardingGuide(
     onboardMenuCx,
     onboardMenuCy,
@@ -360,17 +605,28 @@ export default function PetScreen() {
     ONBOARD_GAP_COUPLE,
     ONBOARD_GAP_COUPLE
   );
-  const onboardAlbumTriangleRot = onboardAlbumGuide.rot;
-  const onboardMenuTriangleRot = onboardMenuGuide.rot;
+  const onboardMenuGuideAdjusted = {
+    ...onboardMenuGuide,
+    tipX: onboardMenuGuide.tipX + ONBOARD_STEP2_ARROW_OFFSET_X,
+    tipY: onboardMenuGuide.tipY + ONBOARD_STEP2_ARROW_OFFSET_Y,
+  };
+  const onboardAlbumTriangleRot = onboardAlbumGuideAdjusted.rot;
+  const onboardMenuTriangleRot = onboardMenuGuideAdjusted.rot;
   const onboardPulse = 3.5;
   const albumHypot =
-    Math.hypot(onboardAlbumCx - onboardAlbumGuide.tipX, onboardAlbumCy - onboardAlbumGuide.tipY) || 1;
+    Math.hypot(
+      onboardAlbumCx - onboardAlbumGuideAdjusted.tipX,
+      onboardAlbumCy - onboardAlbumGuideAdjusted.tipY
+    ) || 1;
   const menuHypot =
-    Math.hypot(onboardMenuCx - onboardMenuGuide.tipX, onboardMenuCy - onboardMenuGuide.tipY) || 1;
-  const albumPulseDx = ((onboardAlbumCx - onboardAlbumGuide.tipX) / albumHypot) * onboardPulse;
-  const albumPulseDy = ((onboardAlbumCy - onboardAlbumGuide.tipY) / albumHypot) * onboardPulse;
-  const menuPulseDx = ((onboardMenuCx - onboardMenuGuide.tipX) / menuHypot) * onboardPulse;
-  const menuPulseDy = ((onboardMenuCy - onboardMenuGuide.tipY) / menuHypot) * onboardPulse;
+    Math.hypot(
+      onboardMenuCx - onboardMenuGuideAdjusted.tipX,
+      onboardMenuCy - onboardMenuGuideAdjusted.tipY
+    ) || 1;
+  const albumPulseDx = ((onboardAlbumCx - onboardAlbumGuideAdjusted.tipX) / albumHypot) * onboardPulse;
+  const albumPulseDy = ((onboardAlbumCy - onboardAlbumGuideAdjusted.tipY) / albumHypot) * onboardPulse;
+  const menuPulseDx = ((onboardMenuCx - onboardMenuGuideAdjusted.tipX) / menuHypot) * onboardPulse;
+  const menuPulseDy = ((onboardMenuCy - onboardMenuGuideAdjusted.tipY) / menuHypot) * onboardPulse;
 
   return (
     <View style={styles.container}>
@@ -399,6 +655,41 @@ export default function PetScreen() {
             </View>
           </View>
           <View style={styles.statsRow}>
+            {shouldShowFlashyNutritionButton && (
+              <Animated.View
+                style={[
+                  styles.nutritionTopRightWrap,
+                  {
+                    transform: [
+                      {
+                        scale: nutritionFlashAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 1.08],
+                        }),
+                      },
+                    ],
+                    opacity: nutritionFlashAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.92, 1],
+                    }),
+                  },
+                ]}
+              >
+                <Pressable
+                  style={styles.nutritionTopRightButton}
+                  onPress={handleNutritionAnalysis}
+                  disabled={nutritionAnalysisLoading}
+                >
+                  {nutritionAnalysisLoading ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={styles.nutritionTopRightButtonText}>
+                      {tLoose('pet.nutritionAnalysis.flashButton')}
+                    </Text>
+                  )}
+                </Pressable>
+              </Animated.View>
+            )}
             <Pressable style={styles.albumBtn} onPress={handleAlbum} testID="album-button">
               <Images size={18} color="#FFF" />
             </Pressable>
@@ -556,6 +847,92 @@ export default function PetScreen() {
           </Modal>
         )}
 
+        <Modal visible={nutritionAnalysisVisible} transparent animationType="fade">
+          <Pressable style={styles.levelUpOverlay} onPress={closeNutritionAnalysis}>
+            <Pressable style={styles.nutritionModalCard} onPress={() => {}}>
+              <Text style={styles.nutritionModalEmoji}>🥗</Text>
+              <Text style={styles.nutritionModalTitle}>
+                {tLoose('pet.nutritionAnalysis.modalTitle')}
+              </Text>
+              <Text style={styles.nutritionModalSubtitle}>
+                {tLoose('pet.nutritionAnalysis.modalSubtitle', {
+                  days: String(NUTRITION_ANALYSIS_DAYS),
+                })}
+              </Text>
+              {nutritionAnalysisTimestamp && (
+                <Text style={styles.nutritionModalMeta}>
+                  {tLoose('pet.nutritionAnalysis.lastAnalyzedAt', {
+                    time: nutritionAnalysisTimestamp,
+                  })}
+                </Text>
+              )}
+
+              {nutritionAnalysisLoading ? (
+                <View style={styles.nutritionModalLoading}>
+                  <ActivityIndicator size="small" color={Colors.softOrange} />
+                  <Text style={styles.nutritionModalLoadingText}>
+                    {tLoose('pet.nutritionAnalysis.analyzing')}
+                  </Text>
+                </View>
+              ) : nutritionAnalysisError ? (
+                <Text style={styles.nutritionModalError}>{nutritionAnalysisError}</Text>
+              ) : nutritionAnalysisResult ? (
+                <View style={styles.nutritionModalContent}>
+                  <Text style={styles.nutritionModalBody}>
+                    {nutritionAnalysisResult.summary}
+                  </Text>
+
+                  <Text style={styles.nutritionModalSectionTitle}>
+                    {tLoose('pet.nutritionAnalysis.missingTitle')}
+                  </Text>
+                  {nutritionAnalysisResult.missingNutrients.length > 0 ? (
+                    <View style={styles.nutrientChipWrap}>
+                      {nutritionAnalysisResult.missingNutrients.map((slug) => {
+                        const { emoji, name } = getNutrientDisplay(slug);
+                        return (
+                          <View key={slug} style={styles.nutrientChip}>
+                            <Text style={styles.nutrientChipText}>
+                              {emoji} {name}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.dailyMuted}>
+                      {tLoose('pet.nutritionAnalysis.noMissing')}
+                    </Text>
+                  )}
+
+                  {nutritionAnalysisResult.suggestions.length > 0 && (
+                    <>
+                      <Text style={styles.nutritionModalSectionTitle}>
+                        {tLoose('pet.nutritionAnalysis.suggestionsTitle')}
+                      </Text>
+                      <View style={styles.nutritionSuggestionList}>
+                        {nutritionAnalysisResult.suggestions.map((suggestion, index) => (
+                          <Text key={`${suggestion}-${index}`} style={styles.nutritionSuggestionText}>
+                            • {suggestion}
+                          </Text>
+                        ))}
+                      </View>
+                    </>
+                  )}
+                </View>
+              ) : null}
+
+              <Pressable
+                style={styles.nutritionModalCloseButton}
+                onPress={closeNutritionAnalysis}
+              >
+                <Text style={styles.nutritionModalCloseButtonText}>
+                  {tLoose('pet.nutritionAnalysis.close')}
+                </Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
         <Modal visible={menuOpen} transparent animationType="fade">
           <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
             <View style={[styles.menuPanel, { top: insets.top + 50 }]}>
@@ -668,8 +1045,8 @@ export default function PetScreen() {
                   style={[
                     styles.onboardingTriangleDirected,
                     {
-                      left: onboardAlbumGuide.tipX - ONBOARD_TRIANGLE_HALF_W,
-                      top: onboardAlbumGuide.tipY - ONBOARD_TRIANGLE_H,
+                      left: onboardAlbumGuideAdjusted.tipX - ONBOARD_TRIANGLE_HALF_W,
+                      top: onboardAlbumGuideAdjusted.tipY - ONBOARD_TRIANGLE_H,
                       transform: [
                         {
                           translateX: onboardingArrowPulse.interpolate({
@@ -705,8 +1082,8 @@ export default function PetScreen() {
                   style={[
                     styles.onboardingTriangleDirected,
                     {
-                      left: onboardMenuGuide.tipX - ONBOARD_TRIANGLE_HALF_W,
-                      top: onboardMenuGuide.tipY - ONBOARD_TRIANGLE_H,
+                      left: onboardMenuGuideAdjusted.tipX - ONBOARD_TRIANGLE_HALF_W,
+                      top: onboardMenuGuideAdjusted.tipY - ONBOARD_TRIANGLE_H,
                       transform: [
                         {
                           translateX: onboardingArrowPulse.interpolate({
@@ -791,6 +1168,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     gap: 8,
+  },
+  nutritionTopRightWrap: {
+    alignSelf: 'center' as const,
+  },
+  nutritionTopRightButton: {
+    backgroundColor: Colors.softGreen,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 34,
+    justifyContent: 'center' as const,
+    shadowColor: Colors.softGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  nutritionTopRightButtonText: {
+    fontSize: 12,
+    fontWeight: '800' as const,
+    color: '#FFF',
   },
   albumBtn: {
     width: 36,
@@ -1007,6 +1405,94 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
+  },
+  nutritionModalCard: {
+    width: '86%',
+    maxWidth: 360,
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  nutritionModalEmoji: {
+    fontSize: 42,
+    textAlign: 'center' as const,
+    marginBottom: 10,
+  },
+  nutritionModalTitle: {
+    fontSize: 22,
+    fontWeight: '800' as const,
+    color: Colors.darkBrown,
+    textAlign: 'center' as const,
+  },
+  nutritionModalSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.brown,
+    textAlign: 'center' as const,
+    marginTop: 8,
+  },
+  nutritionModalMeta: {
+    marginTop: 8,
+    fontSize: 12,
+    color: Colors.brown,
+    opacity: 0.78,
+    textAlign: 'center' as const,
+  },
+  nutritionModalLoading: {
+    paddingVertical: 28,
+    alignItems: 'center' as const,
+    gap: 10,
+  },
+  nutritionModalLoadingText: {
+    fontSize: 14,
+    color: Colors.brown,
+    fontWeight: '600' as const,
+  },
+  nutritionModalContent: {
+    marginTop: 18,
+    gap: 12,
+  },
+  nutritionModalBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.darkBrown,
+  },
+  nutritionModalSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: Colors.darkBrown,
+  },
+  nutritionSuggestionList: {
+    gap: 8,
+  },
+  nutritionSuggestionText: {
+    fontSize: 14,
+    lineHeight: 19,
+    color: Colors.brown,
+  },
+  nutritionModalError: {
+    marginTop: 18,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.brown,
+    textAlign: 'center' as const,
+  },
+  nutritionModalCloseButton: {
+    marginTop: 18,
+    borderRadius: 14,
+    paddingVertical: 12,
+    backgroundColor: Colors.softOrange,
+    alignItems: 'center' as const,
+  },
+  nutritionModalCloseButtonText: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#FFF',
   },
   levelUpCard: {
     backgroundColor: '#FFF',

@@ -303,3 +303,54 @@ export async function getPetPhotosForLocalCalendarDay(
 
   return photos;
 }
+
+/**
+ * Photos whose `created_at` falls within a supplied ISO datetime range.
+ */
+export async function getPetPhotosInDateRange(
+  userId: string,
+  startIso: string,
+  endIso: string
+): Promise<PetPhoto[]> {
+  dbLog('SELECT', 'pet_photos', {
+    params: { userId, startIso, endIso },
+    message: 'Querying photos for explicit datetime range',
+  });
+
+  const { data, error } = await supabaseClient
+    .from('pet_photos')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('created_at', startIso)
+    .lte('created_at', endIso)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    dbLog('SELECT', 'pet_photos', {
+      params: { userId, startIso, endIso },
+      error,
+      message: `Failed explicit range query: ${error.message}`,
+    });
+    throw error;
+  }
+
+  const rows = (data ?? []) as {
+    id: number;
+    user_id: string;
+    pet_id: number;
+    storage_path: string;
+    created_at: string;
+    nutrients?: number[] | null;
+    calories?: number | null;
+  }[];
+
+  return rows.map((row) => {
+    const { data: urlData } = supabaseClient.storage.from(BUCKET).getPublicUrl(row.storage_path);
+    return {
+      ...row,
+      nutrients: row.nutrients ?? null,
+      calories: row.calories ?? null,
+      url: urlData?.publicUrl ?? '',
+    };
+  });
+}
