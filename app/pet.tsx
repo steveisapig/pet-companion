@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   Pressable,
   Animated,
   Dimensions,
@@ -26,6 +25,7 @@ import {
   Package,
   RotateCcw,
   Settings,
+  Users,
 } from 'lucide-react-native';
 import { getNutrientDisplay } from '@/constants/badge-types';
 import Colors from '@/constants/colors';
@@ -45,7 +45,8 @@ import {
   formatNutrientChip,
 } from '@/lib/daily-nutrition';
 import { getPetPhotosForLocalCalendarDay, getPetPhotosInDateRange } from '@/lib/supabase-photos';
-import { getMoodLabelKey, PET_CONFIGS, MOOD_CONFIG, getPetImageForMood } from '@/constants/pets';
+import { getMoodLabelKey, PET_CONFIGS, MOOD_CONFIG } from '@/constants/pets';
+import PetPortrait from '@/components/PetPortrait';
 import { useOnboarding } from '@/providers/OnboardingProvider';
 import { usePet } from '@/providers/PetProvider';
 import { useAuth } from '@/providers/AuthProvider';
@@ -174,6 +175,8 @@ export default function PetScreen() {
   const {
     petType, petName, happiness, mood, userId,
     level, expProgress, justLeveledUp, clearLevelUp,
+    petPrimaryColor,
+    setPetPrimaryColor,
   } = usePet();
 
   const {
@@ -470,6 +473,12 @@ export default function PetScreen() {
     router.replace('/sign-in');
   }, [signOut]);
 
+  const handleGroup = useCallback(() => {
+    setMenuOpen(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push('/group');
+  }, []);
+
   const handleSettings = useCallback(async () => {
     setMenuOpen(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -731,8 +740,7 @@ export default function PetScreen() {
 
         {userId && hasSupabaseConfig() && (
           <View style={styles.barSection}>
-            <Text style={styles.barLabel}>{t('pet.todayNutrition')}</Text>
-            <Text style={styles.dailySectionHint}>{t('pet.todayNutritionHint')}</Text>
+            <Text style={styles.barLabel}>{t('pet.todayCalories')}</Text>
             {todayPhotosLoading ? (
               <ActivityIndicator size="small" color={Colors.softOrange} style={styles.dailyLoading} />
             ) : (
@@ -747,6 +755,8 @@ export default function PetScreen() {
                     })}
                   </Text>
                 </View>
+                <Text style={styles.barLabel}>{t('pet.todayNutrition')}</Text>
+                <Text style={styles.dailySectionHint}>{t('pet.todayNutritionHint')}</Text>
                 {dailyNutrition.nutrientItemTypesToday.length > 0 ? (
                   <View style={styles.nutrientChipWrap}>
                     {dailyNutrition.nutrientItemTypesToday.map((t: number) => {
@@ -811,7 +821,12 @@ export default function PetScreen() {
                   <Text style={styles.sadTear}>{mood === 'miserable' ? '😭' : '😢'}</Text>
                 </View>
               )}
-              <Image source={getPetImageForMood(config, mood)} style={styles.petImage} resizeMode="contain" />
+              <PetPortrait
+                petType={petType ?? 'mochi'}
+                mood={mood}
+                primaryColor={petPrimaryColor}
+                style={styles.petImage}
+              />
             </Animated.View>
           </Pressable>
 
@@ -824,6 +839,36 @@ export default function PetScreen() {
                 ? t('pet.tapHint.sad')
                 : t('pet.tapHint.default')}
           </Text>
+
+          <View style={styles.colorThemeRow}>
+            {[
+              { label: 'Original', color: null },
+              { label: 'Red',      color: '#E57373' },
+              { label: 'Green',    color: '#81C784' },
+              { label: 'Blue',     color: '#64B5F6' },
+            ].map(({ label, color }) => {
+              const isActive = petPrimaryColor === color;
+              return (
+                <Pressable
+                  key={label}
+                  onPress={() => setPetPrimaryColor(color)}
+                  style={[
+                    styles.colorThemeBtn,
+                    isActive && styles.colorThemeBtnActive,
+                    color ? { backgroundColor: color } : styles.colorThemeBtnOriginal,
+                  ]}
+                >
+                  <Text style={[
+                    styles.colorThemeBtnLabel,
+                    isActive && styles.colorThemeBtnLabelActive,
+                    !color && styles.colorThemeBtnLabelOriginal,
+                  ]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         {justLeveledUp && (
@@ -944,6 +989,10 @@ export default function PetScreen() {
                 <Flame size={20} color={Colors.darkBrown} />
                 <Text style={styles.menuItemText}>{t('pet.menu.streak')}</Text>
               </Pressable>
+              <Pressable style={styles.menuItem} onPress={handleGroup}>
+                <Users size={20} color={Colors.darkBrown} />
+                <Text style={styles.menuItemText}>Group Initiative</Text>
+              </Pressable>
               <Pressable style={styles.menuItem} onPress={handleSettings}>
                 <Settings size={20} color={Colors.darkBrown} />
                 <Text style={styles.menuItemText}>
@@ -965,6 +1014,13 @@ export default function PetScreen() {
         </Modal>
 
         <View style={styles.bottomActions}>
+          <Pressable
+            style={[styles.actionBtn, styles.groupBtn]}
+            onPress={handleGroup}
+            testID="group-button"
+          >
+            <Users size={22} color={Colors.darkBrown} />
+          </Pressable>
           <Pressable
             style={[styles.actionBtn, styles.cameraBtn]}
             onPress={handleCamera}
@@ -1371,6 +1427,41 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     marginTop: 16,
   },
+  colorThemeRow: {
+    flexDirection: 'row' as const,
+    gap: 8,
+    marginTop: 14,
+  },
+  colorThemeBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorThemeBtnActive: {
+    borderColor: '#FFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  colorThemeBtnOriginal: {
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderColor: 'rgba(212,165,116,0.4)',
+  },
+  colorThemeBtnLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#FFF',
+  },
+  colorThemeBtnLabelActive: {
+    fontWeight: '700' as const,
+  },
+  colorThemeBtnLabelOriginal: {
+    color: Colors.darkBrown,
+  },
   floatingEmoji: {
     position: 'absolute' as const,
     fontSize: 28,
@@ -1378,6 +1469,9 @@ const styles = StyleSheet.create({
   },
   bottomActions: {
     paddingTop: 12,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
   },
   actionBtn: {
     flexDirection: 'row' as const,
@@ -1387,7 +1481,17 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 18,
   },
+  groupBtn: {
+    width: 54,
+    flexShrink: 0,
+    paddingVertical: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderWidth: 1.5,
+    borderColor: Colors.beige,
+  },
   cameraBtn: {
+    flex: 1,
     backgroundColor: Colors.softOrange,
     shadowColor: Colors.softOrange,
     shadowOffset: { width: 0, height: 4 },

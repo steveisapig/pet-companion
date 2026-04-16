@@ -23,6 +23,10 @@ import {
   type Badges,
 } from '@/lib/badges';
 import { useAuth } from '@/providers/AuthProvider';
+import {
+  getPetPrimaryColor,
+  savePetPrimaryColor,
+} from '@/lib/pet-color-storage';
 
 interface PetState extends Omit<PetServiceState, 'userId'> {
   userId: string | null;
@@ -76,6 +80,17 @@ export const [PetProvider, usePet] = createContextHook(() => {
   });
 
   const [badges, setBadges] = useState<Badges>({});
+  const [petPrimaryColor, setPetPrimaryColorState] = useState<string | null>(null);
+
+  // Load color from AsyncStorage once on mount
+  useEffect(() => {
+    getPetPrimaryColor().then(setPetPrimaryColorState);
+  }, []);
+
+  const setPetPrimaryColor = useCallback((color: string | null) => {
+    setPetPrimaryColorState(color);
+    savePetPrimaryColor(color);
+  }, []);
 
   const saveMutation = useMutation({
     mutationFn: savePetState,
@@ -234,5 +249,7 @@ export const [PetProvider, usePet] = createContextHook(() => {
     addBadges,
     selectPet,
     addPhoto,
+    petPrimaryColor,
+    setPetPrimaryColor,
   };
 });

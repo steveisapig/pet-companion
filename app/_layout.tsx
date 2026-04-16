@@ -38,6 +38,7 @@ function RootLayoutNav() {
       <Stack.Screen name="settings" />
       <Stack.Screen name="camera" options={{ presentation: "modal" }} />
       <Stack.Screen name="album" />
+      <Stack.Screen name="group" />
     </Stack>
   );
 }

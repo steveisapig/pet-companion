@@ -118,6 +118,7 @@ export const ja = {
       levelShort: 'Lv {{level}}',
       experienceToNextLevel: '経験値（次のレベルまで）',
       happiness: 'しあわせ',
+      todayCalories: '今日のカロリー',
       todayNutrition: '今日の栄養',
       todayNutritionHint: '今日食べたものに含まれる栄養を記録します。',
       caloriesRemaining: '残り {{count}} kcal',

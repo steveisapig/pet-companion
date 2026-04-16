@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   Pressable,
   Animated,
   Dimensions,
@@ -14,7 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
-import { PET_CONFIGS, getPetImageForMood } from '@/constants/pets';
+import PetPortrait from '@/components/PetPortrait';
 import { getPlaceNameKey, PLACE_DEFS, type PlaceId } from '@/constants/items';
 import { WALK_NUTRIENTS, formatNutrientName, getNutrientEmoji } from '@/constants/badges';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -29,7 +28,7 @@ const PLACES: PlaceId[] = ['park', 'beach', 'forest', 'city', 'garden'];
 export default function WalkScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation();
-  const { petType, level, mood, addBadges } = usePet();
+  const { petType, level, mood, addBadges, petPrimaryColor } = usePet();
   const [selectedPlace, setSelectedPlace] = useState<PlaceId>('park');
   const [foundBadge, setFoundBadge] = useState<{ emoji: string; name: string; isFound: boolean } | null>(null);
   const foundBannerOpacity = useRef(new Animated.Value(1)).current;
@@ -39,7 +38,6 @@ export default function WalkScreen() {
   const CENTER_X = WALK_AREA_WIDTH / 2 - 60;
   const CENTER_Y = WALK_AREA_HEIGHT / 2 - 60;
 
-  const config = petType ? PET_CONFIGS[petType] : PET_CONFIGS.mochi;
   const place = PLACE_DEFS[selectedPlace];
 
   const handleSpotTap = useCallback(
@@ -177,7 +175,12 @@ export default function WalkScreen() {
                 },
               ]}
             >
-              <Image source={getPetImageForMood(config, mood)} style={styles.petImage} resizeMode="contain" />
+              <PetPortrait
+                petType={petType ?? 'mochi'}
+                mood={mood}
+                primaryColor={petPrimaryColor}
+                style={styles.petImage}
+              />
             </Animated.View>
 
           {foundBadge && (
@@ -223,7 +226,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700',
     color: Colors.darkBrown,
   },

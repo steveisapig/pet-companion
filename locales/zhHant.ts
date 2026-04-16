@@ -118,6 +118,7 @@ export const zhHant = {
       levelShort: 'Lv {{level}}',
       experienceToNextLevel: '經驗值（距離下一級）',
       happiness: '幸福值',
+      todayCalories: '今日卡路里',
       todayNutrition: '今日營養',
       todayNutritionHint: '這裡會追蹤你今天吃過的食物中的營養。',
       caloriesRemaining: '還剩 {{count}} kcal',

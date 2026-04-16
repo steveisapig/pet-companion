@@ -1,38 +1,20 @@
-import { NUTRIENT_TO_ITEM_TYPE } from '@/constants/badge-types';
-
 export type PhotoRatingTier = 'little' | 'like' | 'love';
 
 export interface PhotoRatingResult {
-  score: number;
   tier: PhotoRatingTier;
 }
 
-/** Distinct nutrients the analyzer can return (same universe as badges). */
-const MAX_NUTRIENTS = Object.keys(NUTRIENT_TO_ITEM_TYPE).length;
-
 /**
- * Pet reaction 0–10 from how many nutrients were identified in the food photo.
- * More nutrients → higher score (linear up to MAX_NUTRIENTS).
+ * Maps a healthScore (0–10, as rated by the LLM) to a pet reaction tier.
  */
-export function photoRatingFromNutrientCount(nutrientCount: number): PhotoRatingResult {
-  const n = Math.max(0, Math.min(nutrientCount, MAX_NUTRIENTS));
-  const score =
-    MAX_NUTRIENTS === 0 ? 0 : Math.min(10, Math.round((n / MAX_NUTRIENTS) * 10));
+export function photoRatingFromHealthScore(healthScore: number): PhotoRatingResult {
+  const score = Math.max(0, Math.min(10, Math.round(healthScore)));
 
   if (score <= 2) {
-    return {
-      score,
-      tier: 'little',
-    };
+    return { tier: 'little' };
   }
   if (score <= 6) {
-    return {
-      score,
-      tier: 'like',
-    };
+    return { tier: 'like' };
   }
-  return {
-    score,
-    tier: 'love',
-  };
+  return { tier: 'love' };
 }

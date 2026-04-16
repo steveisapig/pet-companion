@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   Pressable,
   TextInput,
   Animated,
@@ -20,6 +19,7 @@ import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useOnboarding } from '@/providers/OnboardingProvider';
 import { getPetDescriptionKey, PET_CONFIGS, PetType } from '@/constants/pets';
+import PetPortrait from '@/components/PetPortrait';
 import { usePet } from '@/providers/PetProvider';
 
 const petTypes: PetType[] = ['mochi', 'nugget', 'cookie'];
@@ -137,7 +137,12 @@ export default function OnboardingScreen() {
                           testID={`pet-card-${type}`}
                         >
                           <View style={[styles.petImageContainer, { backgroundColor: pet.color }]}>
-                            <Image source={pet.image} style={styles.petImage} resizeMode="contain" />
+                            <PetPortrait
+                              petType={type}
+                              mood="happy"
+                              primaryColor={null}
+                              style={styles.petImage}
+                            />
                           </View>
                           <View style={styles.petTextColumn}>
                             <Text style={styles.petName}>{pet.name}</Text>
@@ -169,7 +174,12 @@ export default function OnboardingScreen() {
               <>
                 <View style={styles.header}>
                   <View style={styles.nameStepImageWrap}>
-                    <Image source={config.image} style={styles.nameStepImage} resizeMode="contain" />
+                    <PetPortrait
+                      petType={selectedPet}
+                      mood="happy"
+                      primaryColor={null}
+                      style={styles.nameStepImage}
+                    />
                   </View>
                   <Text style={styles.title}>{t('onboarding.nameYourPet')}</Text>
                   <Text style={styles.nameSubtitle}>{t('onboarding.nameSubtitle')}</Text>

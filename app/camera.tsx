@@ -7,7 +7,6 @@ import {
   Image,
   Animated,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,9 +16,7 @@ import { Camera, ImagePlus, X, Check, Sparkles } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
-import { PET_CONFIGS, getPetImageForMood } from '@/constants/pets';
-import { formatNutrientName, getNutrientEmoji } from '@/constants/badges';
-import { photoRatingFromNutrientCount } from '@/lib/photo-rating';
+import PetPortrait from '@/components/PetPortrait';
 import { analyzePhoto } from '@/lib/analyze-photo';
 import {
   countUserLlmQueriesLast24h,
@@ -37,22 +34,14 @@ const hasSupabaseConfig = () =>
 export default function CameraScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation();
-  const { addPhoto, petName, petType, mood, userId, addBadges } = usePet();
+  const { addPhoto, petName, petType, mood, userId, addBadges, petPrimaryColor } = usePet();
   const { user, session } = useAuth();
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [photoResult, setPhotoResult] = useState<{
-    score: number;
-    tier: 'little' | 'like' | 'love';
-    nutrients: string[];
-    calorie: number;
-  } | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const successAnim = useRef(new Animated.Value(0)).current;
   const bounceAnim = useRef(new Animated.Value(0)).current;
   const jumpAnim = useRef(new Animated.Value(0)).current;
-
-  const petConfig = petType ? PET_CONFIGS[petType] : PET_CONFIGS.mochi;
 
   useEffect(() => {
     if (!showSuccess) {
@@ -122,88 +111,13 @@ export default function CameraScreen() {
   }, [t]);
 
   const handleConfirm = useCallback(async () => {
-    if (!capturedUri) {
-      const rating = photoRatingFromNutrientCount(0);
-      addPhoto();
-      setPhotoResult({ score: rating.score, tier: rating.tier, nutrients: [], calorie: 0 });
-      setShowSuccess(true);
-      Animated.parallel([
-        Animated.spring(successAnim, { toValue: 1, friction: 4, tension: 80, useNativeDriver: true }),
-        Animated.sequence([
-          Animated.timing(bounceAnim, { toValue: -15, duration: 150, useNativeDriver: true }),
-          Animated.spring(bounceAnim, { toValue: 0, friction: 3, tension: 200, useNativeDriver: true }),
-        ]),
-      ]).start();
-      return;
-    }
+    if (isConfirming) return;
+    setIsConfirming(true);
 
-    setIsAnalyzing(true);
-    let nutrients: string[] = [];
-    let calorie = 0;
-    let cloudUploadDone = false;
-
-    try {
-      if (hasSupabaseConfig()) {
-        let skipAnalysis = false;
-        if (user?.id) {
-          try {
-            const queryCount = await countUserLlmQueriesLast24h(user.id);
-            if (isAtLlmQueryLimit(queryCount)) {
-              await new Promise<void>((resolve) => {
-                Alert.alert(
-                  t('camera.dailyAnalysisLimitTitle'),
-                  t('camera.dailyAnalysisLimitBody', { count: LLM_QUERY_LIMIT }),
-                  [{ text: t('common.ok'), onPress: () => resolve() }],
-                  { cancelable: false }
-                );
-              });
-              skipAnalysis = true;
-            }
-          } catch (err) {
-            console.error('[Camera] LLM rate limit check failed:', err);
-          }
-        }
-
-        if (!skipAnalysis) {
-          // Analyze first, then upload so pet_photos gets nutrients/calories on insert (no separate UPDATE).
-          const result = await analyzePhoto(capturedUri, session?.access_token);
-          if (result.success) {
-            nutrients = result.nutrients;
-            calorie = result.calorie;
-            if (userId && result.nutrients.length > 0) await addBadges(nutrients);
-          }
-          if (userId && user?.id === userId) {
-            if (result.success) {
-              await uploadPetPhoto(capturedUri, userId, { nutrients, calorie });
-            } else {
-              await uploadPetPhoto(capturedUri, userId);
-            }
-            cloudUploadDone = true;
-          }
-        } else if (userId && user?.id === userId) {
-          await uploadPetPhoto(capturedUri, userId);
-          cloudUploadDone = true;
-        }
-      }
-
-      if (cloudUploadDone && userId) {
-        await recordStreakDayIfPhotoUploaded(userId, new Date()).catch((err) =>
-          console.error('[Camera] streak update:', err)
-        );
-      }
-    } catch (e) {
-      console.error('[Camera] Error uploading photo:', e);
-      Alert.alert(t('camera.uploadFailedTitle'), t('camera.uploadFailedBody'));
-    } finally {
-      setIsAnalyzing(false);
-    }
-
-    const rating = photoRatingFromNutrientCount(nutrients.length);
+    // Show success immediately — analysis runs in the background.
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addPhoto();
-    setPhotoResult({ score: rating.score, tier: rating.tier, nutrients, calorie });
     setShowSuccess(true);
-
     Animated.parallel([
       Animated.spring(successAnim, { toValue: 1, friction: 4, tension: 80, useNativeDriver: true }),
       Animated.sequence([
@@ -211,7 +125,52 @@ export default function CameraScreen() {
         Animated.spring(bounceAnim, { toValue: 0, friction: 3, tension: 200, useNativeDriver: true }),
       ]),
     ]).start();
-  }, [addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session, t]);
+
+    if (!capturedUri || !hasSupabaseConfig()) return;
+
+    // Fire-and-forget: analyze + upload in the background.
+    (async () => {
+      try {
+        let nutrients: string[] = [];
+        let calorie = 0;
+        let cloudUploadDone = false;
+        let skipAnalysis = false;
+
+        if (user?.id) {
+          try {
+            const queryCount = await countUserLlmQueriesLast24h(user.id);
+            if (isAtLlmQueryLimit(queryCount)) skipAnalysis = true;
+          } catch (err) {
+            console.error('[Camera] LLM rate limit check failed:', err);
+          }
+        }
+
+        if (!skipAnalysis) {
+          const result = await analyzePhoto(capturedUri, session?.access_token);
+          if (result.success) {
+            nutrients = result.nutrients;
+            calorie = result.calorie;
+            if (userId && result.nutrients.length > 0) await addBadges(nutrients);
+          }
+          if (userId && user?.id === userId) {
+            await uploadPetPhoto(capturedUri, userId, result.success ? { nutrients, calorie } : undefined);
+            cloudUploadDone = true;
+          }
+        } else if (userId && user?.id === userId) {
+          await uploadPetPhoto(capturedUri, userId);
+          cloudUploadDone = true;
+        }
+
+        if (cloudUploadDone && userId) {
+          await recordStreakDayIfPhotoUploaded(userId, new Date()).catch((err) =>
+            console.error('[Camera] streak update:', err)
+          );
+        }
+      } catch (e) {
+        console.error('[Camera] Background analysis/upload error:', e);
+      }
+    })();
+  }, [isConfirming, addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session, t]);
 
   const handleContinueAfterSuccess = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -247,11 +206,11 @@ export default function CameraScreen() {
                 { transform: [{ translateY: jumpAnim }] },
               ]}
             >
-              <Image
-                source={getPetImageForMood(petConfig, mood)}
+              <PetPortrait
+                petType={petType ?? 'mochi'}
+                mood={mood}
+                primaryColor={petPrimaryColor}
                 style={styles.petSuccessImage}
-                resizeMode="contain"
-                accessibilityLabel={t('camera.petHappyAccessibility', { name: petName })}
               />
             </Animated.View>
             <Animated.View style={[
@@ -265,30 +224,11 @@ export default function CameraScreen() {
             ]}>
               <Sparkles size={48} color={Colors.softOrange} />
               <Text style={styles.successTitle}>
-                {photoResult
-                  ? t('camera.scoreTitle', { name: petName, score: String(photoResult.score) })
-                  : t('camera.lovedTitle', { name: petName })}
+                {t('camera.lovedTitle', { name: petName })}
               </Text>
               <Text style={styles.successSubtitle}>
-                {photoResult
-                  ? `${petName} ${t(`camera.reaction.${photoResult.tier}`)}! `
-                  : ''}{t('camera.happinessBoosted')}
+                {t('camera.happinessBoosted')}
               </Text>
-              {photoResult?.nutrients && photoResult.nutrients.length > 0 && (
-                <View style={styles.rewardRow}>
-                  <Text style={styles.rewardLabel}>{t('camera.badgesEarned')}</Text>
-                  <View style={styles.badgeList}>
-                    {photoResult.nutrients.map((n) => (
-                      <Text key={n} style={styles.rewardItem}>
-                        {getNutrientEmoji(n)} {formatNutrientName(n)}
-                      </Text>
-                    ))}
-                  </View>
-                  {photoResult.calorie > 0 && (
-                    <Text style={styles.calorieText}>{t('camera.caloriesShort', { count: photoResult.calorie })}</Text>
-                  )}
-                </View>
-              )}
             </Animated.View>
             <Pressable
               style={styles.continueBtn}
@@ -310,22 +250,12 @@ export default function CameraScreen() {
                 <Text style={styles.retakeBtnText}>{t('common.retake')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.confirmBtn, isAnalyzing && styles.confirmBtnDisabled]}
+                style={styles.confirmBtn}
                 onPress={handleConfirm}
-                disabled={isAnalyzing}
                 testID="confirm-button"
               >
-                {isAnalyzing ? (
-                  <>
-                    <ActivityIndicator size="small" color="#FFF" />
-                    <Text style={styles.confirmBtnText}>{t('camera.analyzing')}</Text>
-                  </>
-                ) : (
-                  <>
-                    <Check size={20} color="#FFF" />
-                    <Text style={styles.confirmBtnText}>{t('camera.shareNow')}</Text>
-                  </>
-                )}
+                <Check size={20} color="#FFF" />
+                <Text style={styles.confirmBtnText}>{t('camera.shareNow')}</Text>
               </Pressable>
             </View>
           </View>
@@ -491,9 +421,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600' as const,
     color: Colors.brown,
-  },
-  confirmBtnDisabled: {
-    opacity: 0.7,
   },
   confirmBtn: {
     flex: 1.5,

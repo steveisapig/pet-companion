@@ -43,6 +43,7 @@ function makeDummyAnalyzeResponse(): AnalyzePhotoSuccess {
     success: true,
     calorie: MOCK_CALORIE_OPTIONS[randomInt(0, MOCK_CALORIE_OPTIONS.length - 1)],
     nutrients: pickRandomSubset(ALL_NUTRIENT_SLUGS, 1, 5),
+    healthScore: randomInt(1, 10),
   };
 }
 
@@ -50,6 +51,7 @@ export interface AnalyzePhotoSuccess {
   success: true;
   calorie: number;
   nutrients: string[];
+  healthScore: number;
 }
 
 export type AnalyzePhotoFailureCode = 'RATE_LIMIT' | 'AUTH_REQUIRED';
@@ -180,6 +182,7 @@ async function invokeAnalyzePhoto(
         success: true,
         calorie: typeof data.calorie === 'number' ? data.calorie : 0,
         nutrients: data.nutrients.filter((n: unknown) => typeof n === 'string'),
+        healthScore: typeof data.healthScore === 'number' ? Math.max(0, Math.min(10, Math.round(data.healthScore))) : 0,
       };
     }
 

@@ -118,6 +118,7 @@ export const en = {
       levelShort: 'Lv {{level}}',
       experienceToNextLevel: 'Experience (to next level)',
       happiness: 'Happiness',
+      todayCalories: "Today's calories",
       todayNutrition: "Today's nutrition",
       todayNutritionHint: 'Tracks the nutrients from the food you have had today.',
       caloriesRemaining: '{{count}} kcal remaining',
