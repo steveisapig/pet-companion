@@ -20,12 +20,10 @@ import { usePet } from '@/providers/PetProvider';
 import PetPortrait from '@/components/PetPortrait';
 import {
   getGroup,
-  saveGroup,
   clearGroup,
   generateInviteCode,
   createGroupWithDummy,
   createGroupWithCode,
-  GOAL_DEFAULTS,
   type MockGroup,
   type GroupGoalType,
 } from '@/lib/mock-group';
@@ -76,32 +74,33 @@ const GOAL_OPTIONS: GoalOption[] = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function goalProgressLabel(group: MockGroup, myCalories: number, myNutrients: number): string {
-  const p = group.partner;
+  // Sum contributions across all partners
+  const totalPartnerCalories = group.partners.reduce((s, p) => s + p.todayCalories, 0);
+  const totalPartnerNutrients = group.partners.reduce((s, p) => s + p.todayNutrients, 0);
+  const maxStreak = group.partners.reduce((m, p) => Math.max(m, p.streakDays), 0);
   switch (group.goalType) {
-    case 'calories': {
-      const combined = myCalories + p.todayCalories;
-      return `${combined} / ${group.goalValue} kcal today`;
-    }
-    case 'nutrients': {
-      const combined = myNutrients + p.todayNutrients;
-      return `${combined} / ${group.goalValue} nutrients today`;
-    }
+    case 'calories':
+      return `${myCalories + totalPartnerCalories} / ${group.goalValue} kcal today`;
+    case 'nutrients':
+      return `${myNutrients + totalPartnerNutrients} / ${group.goalValue} nutrients today`;
     case 'consistency':
-      return `${p.streakDays} day streak`;
+      return `${maxStreak} day streak`;
     case 'protein':
       return `Tracking protein together`;
   }
 }
 
 function goalProgressPercent(group: MockGroup, myCalories: number, myNutrients: number): number {
-  const p = group.partner;
+  const totalPartnerCalories = group.partners.reduce((s, p) => s + p.todayCalories, 0);
+  const totalPartnerNutrients = group.partners.reduce((s, p) => s + p.todayNutrients, 0);
+  const maxStreak = group.partners.reduce((m, p) => Math.max(m, p.streakDays), 0);
   switch (group.goalType) {
     case 'calories':
-      return Math.min(1, (myCalories + p.todayCalories) / group.goalValue);
+      return Math.min(1, (myCalories + totalPartnerCalories) / group.goalValue);
     case 'nutrients':
-      return Math.min(1, (myNutrients + p.todayNutrients) / group.goalValue);
+      return Math.min(1, (myNutrients + totalPartnerNutrients) / group.goalValue);
     case 'consistency':
-      return Math.min(1, p.streakDays / group.goalValue);
+      return Math.min(1, maxStreak / group.goalValue);
     case 'protein':
       return 0.4; // mock
   }
@@ -235,7 +234,7 @@ export default function GroupScreen() {
           <Pressable style={styles.backBtn} onPress={() => router.back()}>
             <ChevronLeft size={24} color={Colors.darkBrown} />
           </Pressable>
-          <Text style={styles.title}>Group Initiative</Text>
+          <Text style={styles.title}>Partner</Text>
           <View style={styles.headerSpacer} />
         </View>
 
@@ -366,7 +365,10 @@ export default function GroupScreen() {
           )}
 
           {/* ── Active group ────────────────────────────────────────── */}
-          {screen === 'active' && group && goalOption && (
+          {screen === 'active' && group && goalOption && (() => {
+            const partner = group.partners[0];
+            if (!partner) return null;
+            return (
             <>
               {/* Side-by-side pets */}
               <View style={styles.petsRow}>
@@ -390,13 +392,13 @@ export default function GroupScreen() {
                 <View style={styles.petSlot}>
                   <View style={styles.petPortraitWrap}>
                     <PetPortrait
-                      petType={group.partner.petType}
+                      petType={partner.petType}
                       mood="happy"
                       primaryColor={null}
                       style={styles.petPortrait}
                     />
                   </View>
-                  <Text style={styles.petSlotName}>{group.partner.name}</Text>
+                  <Text style={styles.petSlotName}>{partner.name}</Text>
                   <View style={styles.partnerOnline}>
                     <View style={styles.onlineDot} />
                     <Text style={styles.onlineText}>Active today</Text>
@@ -445,12 +447,12 @@ export default function GroupScreen() {
                   </View>
                   <View style={styles.contributionDivider} />
                   <View style={styles.contribution}>
-                    <Text style={styles.contributionLabel}>{group.partner.name}</Text>
+                    <Text style={styles.contributionLabel}>{partner.name}</Text>
                     <Text style={styles.contributionValue}>
                       {group.goalType === 'calories'
-                        ? `${group.partner.todayCalories} kcal`
+                        ? `${partner.todayCalories} kcal`
                         : group.goalType === 'nutrients'
-                          ? `${group.partner.todayNutrients} nutrients`
+                          ? `${partner.todayNutrients} nutrients`
                           : '—'}
                     </Text>
                   </View>
@@ -462,7 +464,8 @@ export default function GroupScreen() {
                 <Text style={styles.leaveBtnText}>Leave group</Text>
               </Pressable>
             </>
-          )}
+            );
+          })()}
         </ScrollView>
       </View>
     </View>

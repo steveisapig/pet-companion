@@ -2,11 +2,18 @@
  * Mock group initiative state — stored in AsyncStorage.
  * No Supabase calls; purely local so the UI flow can be built and iterated on.
  * Replace with real Supabase tables when ready.
+ *
+ * Partner list is modelled as MockPartner[] so that expanding to groups of 3+
+ * (or multiple separate partners) is a data-layer change only — no UI refactor needed.
+ * Today the app enforces a max of 1 partner; the cap lives in one place (MAX_PARTNERS).
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEY = '@pet_companion/mock_group';
+
+/** Maximum number of partners allowed in a group right now. Raise to support larger groups. */
+export const MAX_PARTNERS = 1;
 
 export type GroupGoalType =
   | 'nutrients'     // Eat enough distinct nutrients each day
@@ -28,7 +35,12 @@ export interface MockPartner {
 
 export interface MockGroup {
   inviteCode: string;
-  partner: MockPartner;
+  /**
+   * List of partners in the group.
+   * Currently capped at MAX_PARTNERS (1); structured as an array so the data
+   * schema supports larger groups without a migration when the cap is raised.
+   */
+  partners: MockPartner[];
   goalType: GroupGoalType;
   /** Target value — meaning depends on goalType */
   goalValue: number;
@@ -62,7 +74,12 @@ export async function getGroup(): Promise<MockGroup | null> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as MockGroup;
+    const parsed = JSON.parse(raw) as MockGroup;
+    // Migrate legacy saves that stored a single `partner` field
+    if (!parsed.partners && (parsed as unknown as { partner: MockPartner }).partner) {
+      parsed.partners = [(parsed as unknown as { partner: MockPartner }).partner];
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -80,10 +97,15 @@ export function generateInviteCode(): string {
   return randomCode();
 }
 
+/** Returns true if the group has reached the partner cap. */
+export function isGroupFull(group: MockGroup): boolean {
+  return group.partners.length >= MAX_PARTNERS;
+}
+
 export async function createGroupWithDummy(goalType: GroupGoalType): Promise<MockGroup> {
   const group: MockGroup = {
     inviteCode: generateInviteCode(),
-    partner: DUMMY_PARTNER,
+    partners: [DUMMY_PARTNER],
     goalType,
     goalValue: GOAL_DEFAULTS[goalType],
     createdAt: new Date().toISOString(),
@@ -98,11 +120,22 @@ export async function createGroupWithCode(
 ): Promise<MockGroup> {
   const group: MockGroup = {
     inviteCode,
-    partner: { ...DUMMY_PARTNER, name: 'Friend' },
+    partners: [{ ...DUMMY_PARTNER, name: 'Friend' }],
     goalType,
     goalValue: GOAL_DEFAULTS[goalType],
     createdAt: new Date().toISOString(),
   };
   await saveGroup(group);
   return group;
+}
+
+/** Add a partner to an existing group (respects MAX_PARTNERS cap). */
+export async function addPartnerToGroup(
+  group: MockGroup,
+  partner: MockPartner
+): Promise<MockGroup | null> {
+  if (isGroupFull(group)) return null;
+  const updated: MockGroup = { ...group, partners: [...group.partners, partner] };
+  await saveGroup(updated);
+  return updated;
 }

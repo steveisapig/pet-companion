@@ -1,9 +1,13 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { LogBox } from "react-native";
+import { LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import OfflineBanner from "@/components/OfflineBanner";
 
 // Stale AsyncStorage session: GoTrue logs then clears the session; not actionable in dev UI.
 if (__DEV__) {
@@ -21,7 +25,34 @@ import { initializeI18n } from "@/lib/i18n";
 
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Serve cached data for 5 minutes before background-refetching
+      staleTime: 5 * 60 * 1000,
+      // Keep unused cache entries for 24 hours so they survive offline sessions
+      gcTime: 24 * 60 * 60 * 1000,
+    },
+  },
+});
+
+const asyncStoragePersister = createAsyncStoragePersister({
+  storage: AsyncStorage,
+  key: '@pet_companion/query-cache',
+  // Exclude album photos — they contain image URLs and can be large
+  serialize: (cache) => {
+    const filtered = {
+      ...cache,
+      clientState: {
+        ...cache.clientState,
+        queries: cache.clientState.queries.filter(
+          (q) => q.queryKey[0] !== 'albumPhotos'
+        ),
+      },
+    };
+    return JSON.stringify(filtered);
+  },
+});
 
 function RootLayoutNav() {
   return (
@@ -68,19 +99,25 @@ export default function RootLayout() {
 
   return (
     <I18nProvider>
-      <QueryClientProvider client={queryClient}>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{ persister: asyncStoragePersister }}
+      >
         <GestureHandlerRootView style={{ flex: 1 }}>
-          <AuthProvider>
-            <PetProvider>
-              <NotificationsProvider>
-                <OnboardingProvider>
-                  <RootLayoutNav />
-                </OnboardingProvider>
-              </NotificationsProvider>
-            </PetProvider>
-          </AuthProvider>
+          <View style={{ flex: 1 }}>
+            <AuthProvider>
+              <PetProvider>
+                <NotificationsProvider>
+                  <OnboardingProvider>
+                    <RootLayoutNav />
+                  </OnboardingProvider>
+                </NotificationsProvider>
+              </PetProvider>
+            </AuthProvider>
+            <OfflineBanner />
+          </View>
         </GestureHandlerRootView>
-      </QueryClientProvider>
+      </PersistQueryClientProvider>
     </I18nProvider>
   );
 }

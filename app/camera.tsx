@@ -6,13 +6,10 @@ import {
   Pressable,
   Image,
   Animated,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
-import { Camera, ImagePlus, X, Check, Sparkles } from 'lucide-react-native';
+import { X, Check, Sparkles, ImagePlus } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -27,6 +24,7 @@ import { usePet } from '@/providers/PetProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { uploadPetPhoto } from '@/lib/supabase-photos';
 import { recordStreakDayIfPhotoUploaded } from '@/lib/user-streak';
+import { consumePendingCameraUri, launchNativeGallery } from '@/lib/native-camera';
 
 const hasSupabaseConfig = () =>
   !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
@@ -36,6 +34,7 @@ export default function CameraScreen() {
   const { t } = useAppTranslation();
   const { addPhoto, petName, petType, mood, userId, addBadges, petPrimaryColor } = usePet();
   const { user, session } = useAuth();
+
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -43,24 +42,23 @@ export default function CameraScreen() {
   const bounceAnim = useRef(new Animated.Value(0)).current;
   const jumpAnim = useRef(new Animated.Value(0)).current;
 
+  // Read the URI captured by pet.tsx before navigation
   useEffect(() => {
-    if (!showSuccess) {
-      jumpAnim.setValue(0);
-      return;
+    const uri = consumePendingCameraUri();
+    if (!uri) {
+      router.back();
+    } else {
+      setCapturedUri(uri);
     }
+  }, []);
+
+  // Success animation loop
+  useEffect(() => {
+    if (!showSuccess) { jumpAnim.setValue(0); return; }
     const hop = Animated.loop(
       Animated.sequence([
-        Animated.timing(jumpAnim, {
-          toValue: -32,
-          duration: 260,
-          useNativeDriver: true,
-        }),
-        Animated.spring(jumpAnim, {
-          toValue: 0,
-          friction: 4,
-          tension: 220,
-          useNativeDriver: true,
-        }),
+        Animated.timing(jumpAnim, { toValue: -32, duration: 260, useNativeDriver: true }),
+        Animated.spring(jumpAnim, { toValue: 0, friction: 4, tension: 220, useNativeDriver: true }),
         Animated.delay(180),
       ])
     );
@@ -68,53 +66,16 @@ export default function CameraScreen() {
     return () => hop.stop();
   }, [showSuccess, jumpAnim]);
 
-  const handleTakePhoto = useCallback(async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          t('camera.permissionNeeded'),
-          t('camera.permissionBody')
-        );
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 0.92,
-      });
-      if (!result.canceled && result.assets[0]) {
-        console.log('[Camera] Photo taken:', result.assets[0].uri);
-        setCapturedUri(result.assets[0].uri);
-      }
-    } catch (e) {
-      console.error('[Camera] Error taking photo:', e);
-      Alert.alert(t('camera.errorTitle'), t('camera.takePhotoError'));
-    }
-  }, [t]);
-
-  const handlePickImage = useCallback(async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 0.75,
-      });
-      if (!result.canceled && result.assets[0]) {
-        console.log('[Camera] Image picked:', result.assets[0].uri);
-        setCapturedUri(result.assets[0].uri);
-      }
-    } catch (e) {
-      console.error('[Camera] Error picking image:', e);
-      Alert.alert(t('camera.errorTitle'), t('camera.pickImageError'));
-    }
-  }, [t]);
+  const handlePickFromGallery = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const uri = await launchNativeGallery();
+    if (uri) setCapturedUri(uri);
+  }, []);
 
   const handleConfirm = useCallback(async () => {
     if (isConfirming) return;
     setIsConfirming(true);
 
-    // Show success immediately — analysis runs in the background.
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addPhoto();
     setShowSuccess(true);
@@ -128,7 +89,6 @@ export default function CameraScreen() {
 
     if (!capturedUri || !hasSupabaseConfig()) return;
 
-    // Fire-and-forget: analyze + upload in the background.
     (async () => {
       try {
         let nutrients: string[] = [];
@@ -170,114 +130,67 @@ export default function CameraScreen() {
         console.error('[Camera] Background analysis/upload error:', e);
       }
     })();
-  }, [isConfirming, addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session, t]);
+  }, [isConfirming, addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session]);
 
-  const handleContinueAfterSuccess = useCallback(() => {
+  const handleContinue = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.back();
   }, []);
 
-  const handleRetake = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCapturedUri(null);
-  }, []);
+  // Blank while native camera is open (native UI covers our screen entirely)
+  if (!capturedUri && !showSuccess) return null;
 
+  // ── Success ────────────────────────────────────────────────────────────────
+  if (showSuccess) {
+    return (
+      <View style={[styles.container, { backgroundColor: '#FFF8F0' }]}>
+        <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}>
+          <Animated.View style={{ transform: [{ translateY: jumpAnim }] }}>
+            <PetPortrait petType={petType ?? 'mochi'} mood={mood} primaryColor={petPrimaryColor} style={styles.petImage} />
+          </Animated.View>
+          <Animated.View style={[styles.successContent, { transform: [{ scale: successAnim }, { translateY: bounceAnim }] }]}>
+            <Sparkles size={48} color={Colors.softOrange} />
+            <Text style={styles.successTitle}>{t('camera.lovedTitle', { name: petName })}</Text>
+            <Text style={styles.successSubtitle}>{t('camera.happinessBoosted')}</Text>
+          </Animated.View>
+          <Pressable style={styles.continueBtn} onPress={handleContinue} testID="success-continue-button">
+            <Text style={styles.continueBtnText}>{t('common.continue')}</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Preview ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#FFF8F0', '#FAF0E6', '#F5E6D3']}
-        style={StyleSheet.absoluteFill}
-      />
+      {/* Image fills available space */}
+      <View style={styles.previewContainer}>
+        <Image source={{ uri: capturedUri! }} style={styles.previewImage} />
+      </View>
 
-      <View style={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 12 }]}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.closeBtn} testID="close-camera">
-            <X size={24} color={Colors.darkBrown} />
+      {/* X button pinned to top-left */}
+      <Pressable
+        onPress={() => router.back()}
+        style={[styles.closeBtn, { top: insets.top + 12, left: 16 }]}
+        testID="close-camera"
+      >
+        <X size={22} color={Colors.darkBrown} />
+      </Pressable>
+
+      {/* Bottom action bar */}
+      <View style={[styles.actionBar, { paddingBottom: insets.bottom + 16 }]}>
+        <Text style={styles.previewHint}>{t('camera.previewHint', { name: petName })}</Text>
+        <View style={styles.actions}>
+          <Pressable style={styles.galleryBtn} onPress={handlePickFromGallery} testID="gallery-button">
+            <ImagePlus size={20} color={Colors.brown} />
+            <Text style={styles.galleryBtnText}>{t('camera.chooseFromGallery')}</Text>
           </Pressable>
-          <Text style={styles.headerTitle}>{t('camera.headerTitle')}</Text>
-          <View style={{ width: 40 }} />
+          <Pressable style={styles.confirmBtn} onPress={handleConfirm} testID="confirm-button">
+            <Check size={20} color="#FFF" />
+            <Text style={styles.confirmBtnText}>{t('camera.shareNow')}</Text>
+          </Pressable>
         </View>
-
-        {showSuccess ? (
-          <View style={styles.successContainer}>
-            <Animated.View
-              style={[
-                styles.petJumpWrap,
-                { transform: [{ translateY: jumpAnim }] },
-              ]}
-            >
-              <PetPortrait
-                petType={petType ?? 'mochi'}
-                mood={mood}
-                primaryColor={petPrimaryColor}
-                style={styles.petSuccessImage}
-              />
-            </Animated.View>
-            <Animated.View style={[
-              styles.successContent,
-              {
-                transform: [
-                  { scale: successAnim },
-                  { translateY: bounceAnim },
-                ],
-              },
-            ]}>
-              <Sparkles size={48} color={Colors.softOrange} />
-              <Text style={styles.successTitle}>
-                {t('camera.lovedTitle', { name: petName })}
-              </Text>
-              <Text style={styles.successSubtitle}>
-                {t('camera.happinessBoosted')}
-              </Text>
-            </Animated.View>
-            <Pressable
-              style={styles.continueBtn}
-              onPress={handleContinueAfterSuccess}
-              testID="success-continue-button"
-            >
-              <Text style={styles.continueBtnText}>{t('common.continue')}</Text>
-            </Pressable>
-          </View>
-        ) : capturedUri ? (
-          <View style={styles.previewContainer}>
-            <View style={styles.previewImageWrap}>
-              <Image source={{ uri: capturedUri }} style={styles.previewImage} />
-            </View>
-            <Text style={styles.previewHint}>{t('camera.previewHint', { name: petName })}</Text>
-            <View style={styles.previewActions}>
-              <Pressable style={styles.retakeBtn} onPress={handleRetake} testID="retake-button">
-                <X size={20} color={Colors.brown} />
-                <Text style={styles.retakeBtnText}>{t('common.retake')}</Text>
-              </Pressable>
-              <Pressable
-                style={styles.confirmBtn}
-                onPress={handleConfirm}
-                testID="confirm-button"
-              >
-                <Check size={20} color="#FFF" />
-                <Text style={styles.confirmBtnText}>{t('camera.shareNow')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.captureContainer}>
-            <View style={styles.placeholderImage}>
-              <Camera size={64} color={Colors.caramel} strokeWidth={1.2} />
-              <Text style={styles.placeholderText}>{t('camera.capturePrompt', { name: petName })}</Text>
-            </View>
-
-            <View style={styles.captureActions}>
-              <Pressable style={styles.captureBtn} onPress={handleTakePhoto} testID="take-photo-button">
-                <Camera size={24} color="#FFF" />
-                <Text style={styles.captureBtnText}>{t('camera.takePhoto')}</Text>
-              </Pressable>
-              <Pressable style={styles.galleryBtn} onPress={handlePickImage} testID="pick-image-button">
-                <ImagePlus size={24} color="#FFF" />
-                <Text style={styles.galleryBtnText}>{t('camera.chooseFromGallery')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
       </View>
     </View>
   );
@@ -286,139 +199,56 @@ export default function CameraScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  header: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    alignItems: 'center' as const,
-    marginBottom: 24,
+    backgroundColor: '#000',
   },
   closeBtn: {
+    position: 'absolute' as const,
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.6)',
+    backgroundColor: 'rgba(255,255,255,0.85)',
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-    color: Colors.darkBrown,
-  },
-  captureContainer: {
-    flex: 1,
-    justifyContent: 'center' as const,
-    gap: 40,
-  },
-  placeholderImage: {
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    backgroundColor: 'rgba(255,255,255,0.5)',
-    borderRadius: 24,
-    paddingVertical: 48,
-    paddingHorizontal: 32,
-    borderWidth: 2,
-    borderColor: Colors.beige,
-    borderStyle: 'dashed' as const,
-  },
-  placeholderText: {
-    fontSize: 16,
-    color: Colors.brown,
-    textAlign: 'center' as const,
-    marginTop: 16,
-    lineHeight: 24,
-    opacity: 0.7,
-  },
-  captureActions: {
-    gap: 12,
-  },
-  captureBtn: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 10,
-    backgroundColor: Colors.softOrange,
-    paddingVertical: 16,
-    borderRadius: 18,
-    shadowColor: Colors.softOrange,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  captureBtnText: {
-    fontSize: 16,
-    fontWeight: '700' as const,
-    color: '#FFF',
-  },
-  galleryBtn: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 10,
-    backgroundColor: Colors.softOrange,
-    paddingVertical: 16,
-    borderRadius: 18,
-    shadowColor: Colors.softOrange,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  galleryBtnText: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    color: '#FFF',
+    zIndex: 10,
   },
   previewContainer: {
     flex: 1,
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-    gap: 24,
-  },
-  previewImageWrap: {
-    borderRadius: 24,
-    overflow: 'hidden' as const,
-    shadowColor: Colors.brown,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 8,
   },
   previewImage: {
-    width: 280,
-    height: 280,
-    borderRadius: 24,
+    flex: 1,
+    width: '100%' as const,
+    resizeMode: 'cover' as const,
+  },
+  actionBar: {
+    backgroundColor: '#FFF8F0',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    gap: 12,
   },
   previewHint: {
-    fontSize: 16,
+    fontSize: 15,
     color: Colors.brown,
     opacity: 0.7,
+    textAlign: 'center' as const,
   },
-  previewActions: {
+  actions: {
     flexDirection: 'row' as const,
     gap: 12,
-    width: '100%',
   },
-  retakeBtn: {
+  galleryBtn: {
     flex: 1,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: 'rgba(255,255,255,0.8)',
     paddingVertical: 16,
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: Colors.beige,
   },
-  retakeBtnText: {
-    fontSize: 15,
+  galleryBtnText: {
+    fontSize: 13,
     fontWeight: '600' as const,
     color: Colors.brown,
   },
@@ -437,42 +267,11 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: '#FFF',
   },
-  successContainer: {
-    flex: 1,
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-    gap: 8,
-  },
-  petJumpWrap: {
-    marginBottom: 4,
-  },
-  petSuccessImage: {
-    width: 140,
-    height: 140,
-  },
+  petImage: { width: 140, height: 140 },
   successContent: {
     alignItems: 'center' as const,
     gap: 16,
-  },
-  continueBtn: {
-    marginTop: 28,
-    alignSelf: 'stretch' as const,
-    backgroundColor: Colors.softOrange,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 18,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    shadowColor: Colors.softOrange,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  continueBtnText: {
-    fontSize: 17,
-    fontWeight: '700' as const,
-    color: '#FFF',
+    marginTop: 8,
   },
   successTitle: {
     fontSize: 28,
@@ -484,34 +283,22 @@ const styles = StyleSheet.create({
     color: Colors.softOrange,
     fontWeight: '600' as const,
   },
-  rewardRow: {
+  continueBtn: {
+    marginTop: 28,
+    alignSelf: 'stretch' as const,
+    backgroundColor: Colors.softOrange,
+    paddingVertical: 16,
+    borderRadius: 18,
     alignItems: 'center' as const,
-    gap: 8,
-    marginTop: 16,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    shadowColor: Colors.softOrange,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 5,
   },
-  badgeList: {
-    flexDirection: 'row' as const,
-    flexWrap: 'wrap' as const,
-    justifyContent: 'center' as const,
-    gap: 8,
-  },
-  calorieText: {
-    fontSize: 12,
-    color: Colors.brown,
-    opacity: 0.8,
-  },
-  rewardLabel: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    color: Colors.brown,
-  },
-  rewardItem: {
-    fontSize: 16,
+  continueBtnText: {
+    fontSize: 17,
     fontWeight: '700' as const,
-    color: Colors.darkBrown,
+    color: '#FFF',
   },
 });

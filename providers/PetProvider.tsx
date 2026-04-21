@@ -58,7 +58,31 @@ async function savePetState(state: PetState): Promise<PetState> {
   return state;
 }
 
-export const [PetProvider, usePet] = createContextHook(() => {
+const PET_LOADING_FALLBACK = {
+  petType: null as import('@/constants/pets').PetType | null,
+  petName: '',
+  userId: null as string | null,
+  happiness: 70,
+  mood: 'happy' as ReturnType<typeof import('@/constants/pets').getMoodFromHappiness>,
+  photosCount: 0,
+  experience: 0,
+  level: 1,
+  expProgress: 0,
+  expForNextLevel: 15,
+  justLeveledUp: false,
+  clearLevelUp: () => {},
+  onboardingComplete: false,
+  isLoading: true,
+  badges: {} as import('@/lib/badges').Badges,
+  topNutrientBadge: null as { itemType: number; count: number } | null,
+  addBadges: async (_nutrients: string[]) => {},
+  selectPet: async (_type: import('@/constants/pets').PetType, _name: string) => {},
+  addPhoto: () => {},
+  petPrimaryColor: null as string | null,
+  setPetPrimaryColor: (_color: string | null) => {},
+};
+
+const [PetProvider, _usePetRaw] = createContextHook(() => {
   const queryClient = useQueryClient();
   const { isSignedIn, user } = useAuth();
   const [petState, setPetState] = useState<PetState>(DEFAULT_STATE);
@@ -253,3 +277,10 @@ export const [PetProvider, usePet] = createContextHook(() => {
     setPetPrimaryColor,
   };
 });
+
+export { PetProvider };
+
+/** Safe wrapper — returns a loading fallback during Fast Refresh / provider initialization. */
+export function usePet() {
+  return _usePetRaw() ?? PET_LOADING_FALLBACK;
+}

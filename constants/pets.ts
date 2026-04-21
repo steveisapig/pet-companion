@@ -11,6 +11,29 @@ export interface PetConfig {
   imageSad?: any;
   color: string;
   accentColor: string;
+
+  /**
+   * Multi-layer (Option C) assets. When provided, PetPortrait renders these
+   * instead of `image` / `imageSad`.
+   *
+   * Required art spec:
+   *   bodyImage      – grayscale/white body-only PNG (transparent bg). Receives
+   *                    tintColor = user's chosen primaryColor at runtime.
+   *   detailImage    – eyes, mouth, outlines only PNG (transparent bg). Rendered
+   *                    on top with no tint so details stay crisp.
+   *   bodyImageSad   – body layer for sad/miserable moods (optional; falls back
+   *                    to bodyImage if omitted).
+   *   detailImageSad – detail layer for sad/miserable moods (falls back to
+   *                    detailImage if omitted).
+   *
+   * Until these assets are delivered, PetPortrait falls back to `image` /
+   * `imageSad` and shows a soft color aura behind the pet to preview the
+   * chosen color.
+   */
+  bodyImage?: any;
+  detailImage?: any;
+  bodyImageSad?: any;
+  detailImageSad?: any;
 }
 
 export const PET_CONFIGS: Record<PetType, PetConfig> = {
@@ -28,6 +51,7 @@ export const PET_CONFIGS: Record<PetType, PetConfig> = {
     name: 'Nugget',
     description: 'A warm, golden buddy full of energy',
     image: require('@/assets/images/pet-nugget.png'),
+    imageSad: require('@/assets/images/sad-nugget.png'),
     color: '#FFF3E0',
     accentColor: '#E8985E',
   },

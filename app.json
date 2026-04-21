@@ -49,6 +49,7 @@
       }
     },
     "plugins": [
+      "./plugins/with-cxx17",
       "expo-font",
       "expo-sqlite",
       [

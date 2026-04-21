@@ -15,6 +15,7 @@ import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { launchNativeCamera, setPendingCameraUri } from '@/lib/native-camera';
 import Svg, { Polygon } from 'react-native-svg';
 import {
   Camera,
@@ -438,7 +439,13 @@ export default function PetScreen() {
   const handleCamera = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onboardingStep === 0) await advanceStep();
-    router.push('/camera');
+    // Launch the native camera while the pet screen is fully visible (no modal race condition).
+    // Only navigate to the preview screen once we have a URI.
+    const uri = await launchNativeCamera();
+    if (uri) {
+      setPendingCameraUri(uri);
+      router.push('/camera');
+    }
   }, [onboardingStep, advanceStep]);
 
   const handleAlbum = useCallback(async () => {
@@ -991,7 +998,7 @@ export default function PetScreen() {
               </Pressable>
               <Pressable style={styles.menuItem} onPress={handleGroup}>
                 <Users size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>Group Initiative</Text>
+                <Text style={styles.menuItemText}>Partner</Text>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={handleSettings}>
                 <Settings size={20} color={Colors.darkBrown} />
