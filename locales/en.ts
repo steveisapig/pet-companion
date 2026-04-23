@@ -36,6 +36,7 @@ export const en = {
       ok: 'OK',
       retake: 'Retake',
       loading: 'Loading...',
+      cancel: 'Cancel',
     },
     pets: {
       mochi: {
@@ -134,6 +135,7 @@ export const en = {
       tapToContinue: 'Tap to continue',
       menu: {
         badges: 'Badges',
+        items: 'Items',
         streak: 'Streak',
         settings: 'Settings',
         replayOnboarding: 'Replay onboarding tips',
@@ -203,6 +205,9 @@ export const en = {
       capturePrompt: 'Capture a moment from\nyour day for {{name}}',
       takePhoto: 'Take Photo',
       chooseFromGallery: 'Choose from Gallery',
+      photoPermissionTitle: 'Photo Library Access',
+      photoPermissionMessage: 'Please allow access to your photo library in Settings so you can choose a photo to share with your pet.',
+      openSettings: 'Open Settings',
     },
     notifications: {
       hungryTitle: '{{name}} is getting hungry 🍽️',
@@ -224,6 +229,11 @@ export const en = {
         city: 'City',
         garden: 'Garden',
       },
+    },
+    items: {
+      title: 'Items',
+      subtitle: "{{name}}'s collected items",
+      empty: 'No items yet!\nShare meal photos or go on a Virtual Walk to earn nutrient items.',
     },
     inventory: {
       title: 'Badges',

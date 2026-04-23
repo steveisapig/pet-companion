@@ -36,6 +36,7 @@ export const zhHant = {
       ok: '確定',
       retake: '重拍',
       loading: '載入中...',
+      cancel: '取消',
     },
     pets: {
       mochi: {
@@ -134,6 +135,7 @@ export const zhHant = {
       tapToContinue: '點擊繼續',
       menu: {
         badges: '徽章',
+        items: '物品',
         streak: '連續紀錄',
         settings: '設定',
         replayOnboarding: '重新查看引導提示',
@@ -202,6 +204,9 @@ export const zhHant = {
       capturePrompt: '為 {{name}}\n記錄你今天的一個瞬間',
       takePhoto: '拍照',
       chooseFromGallery: '從相簿選擇',
+      photoPermissionTitle: '存取相簿',
+      photoPermissionMessage: '請在設定中允許存取相簿，以便選擇照片與您的寵物分享。',
+      openSettings: '開啟設定',
     },
     notifications: {
       hungryTitle: '{{name}} 餓了 🍽️',
@@ -223,6 +228,11 @@ export const zhHant = {
         city: '城市',
         garden: '花園',
       },
+    },
+    items: {
+      title: '物品',
+      subtitle: '{{name}}收集的物品',
+      empty: '還沒有物品！\n分享餐點照片或去 Virtual Walk，就能獲得營養物品。',
     },
     inventory: {
       title: '徽章',

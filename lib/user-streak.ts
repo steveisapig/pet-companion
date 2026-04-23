@@ -45,11 +45,7 @@ export async function recordStreakDayIfPhotoUploaded(
   const { error } = await supabase.from('user_streak').insert(row);
 
   if (error) {
-    const errBlob = `${error.message ?? ''}${(error as { details?: string }).details ?? ''}`;
-    if (
-      error.code === '23505' &&
-      errBlob.includes('(user_id, date)')
-    ) {
+    if (error.code === '23505') {
       dbLog('INSERT', 'user_streak', {
         params: { userId, dateStr },
         message: 'Streak day already recorded',

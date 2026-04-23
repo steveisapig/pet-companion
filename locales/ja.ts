@@ -36,6 +36,7 @@ export const ja = {
       ok: 'OK',
       retake: '撮り直す',
       loading: '読み込み中...',
+      cancel: 'キャンセル',
     },
     pets: {
       mochi: {
@@ -133,6 +134,7 @@ export const ja = {
       tapToContinue: 'タップして続ける',
       menu: {
         badges: 'バッジ',
+        items: 'アイテム',
         streak: 'ストリーク',
         settings: '設定',
         replayOnboarding: 'オンボーディングをもう一度見る',
@@ -202,6 +204,9 @@ export const ja = {
       capturePrompt: '{{name}} のために\n今日のひとコマを残そう',
       takePhoto: '写真を撮る',
       chooseFromGallery: 'ギャラリーから選ぶ',
+      photoPermissionTitle: 'フォトライブラリへのアクセス',
+      photoPermissionMessage: 'ペットと写真を共有するために、設定でフォトライブラリへのアクセスを許可してください。',
+      openSettings: '設定を開く',
     },
     notifications: {
       hungryTitle: '{{name}} がお腹をすかせています 🍽️',
@@ -223,6 +228,11 @@ export const ja = {
         city: '街',
         garden: 'ガーデン',
       },
+    },
+    items: {
+      title: 'アイテム',
+      subtitle: '{{name}}の集めたアイテム',
+      empty: 'まだアイテムがありません！\n食事の写真をシェアするか、Virtual Walk に出かけて栄養アイテムを集めましょう。',
     },
     inventory: {
       title: 'バッジ',

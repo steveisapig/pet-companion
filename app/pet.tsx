@@ -15,7 +15,6 @@ import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { launchNativeCamera, setPendingCameraUri } from '@/lib/native-camera';
 import Svg, { Polygon } from 'react-native-svg';
 import {
   Camera,
@@ -26,6 +25,7 @@ import {
   Package,
   RotateCcw,
   Settings,
+  Star,
   Users,
 } from 'lucide-react-native';
 import { getNutrientDisplay } from '@/constants/badge-types';
@@ -439,13 +439,7 @@ export default function PetScreen() {
   const handleCamera = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onboardingStep === 0) await advanceStep();
-    // Launch the native camera while the pet screen is fully visible (no modal race condition).
-    // Only navigate to the preview screen once we have a URI.
-    const uri = await launchNativeCamera();
-    if (uri) {
-      setPendingCameraUri(uri);
-      router.push('/camera');
-    }
+    router.push('/camera');
   }, [onboardingStep, advanceStep]);
 
   const handleAlbum = useCallback(async () => {
@@ -460,6 +454,12 @@ export default function PetScreen() {
     if (onboardingStep === 2) await advanceStep();
     router.push('/inventory');
   }, [onboardingStep, advanceStep]);
+
+  const handleItems = useCallback(() => {
+    setMenuOpen(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push('/items');
+  }, []);
 
   const handleStreak = useCallback(async () => {
     setMenuOpen(false);
@@ -991,6 +991,10 @@ export default function PetScreen() {
               <Pressable style={styles.menuItem} onPress={handleInventory}>
                 <Package size={20} color={Colors.darkBrown} />
                 <Text style={styles.menuItemText}>{t('pet.menu.badges')}</Text>
+              </Pressable>
+              <Pressable style={styles.menuItem} onPress={handleItems}>
+                <Star size={20} color={Colors.darkBrown} />
+                <Text style={styles.menuItemText}>{t('pet.menu.items')}</Text>
               </Pressable>
               <Pressable style={styles.menuItem} onPress={handleStreak}>
                 <Flame size={20} color={Colors.darkBrown} />
