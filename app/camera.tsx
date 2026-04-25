@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   View,
   Text,
@@ -18,7 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { X, Check, Sparkles, ImagePlus, RotateCcw, RotateCw, ArrowLeft } from 'lucide-react-native';
+import { X, Check, Sparkles, ImagePlus, RotateCcw, RotateCw, ArrowLeft, Heart, Users } from 'lucide-react-native';
 
 import { router } from 'expo-router';
 import Colors from '@/constants/colors';
@@ -33,6 +34,7 @@ import { usePet } from '@/providers/PetProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { uploadPetPhoto } from '@/lib/supabase-photos';
 import { recordStreakDayIfPhotoUploaded } from '@/lib/user-streak';
+import { getMyPartnership } from '@/lib/partnerships';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -118,6 +120,15 @@ function computedImgStyle(
   return { position: 'absolute' as const, left: cx - elemW / 2, top: cy - elemH / 2, width: elemW, height: elemH };
 }
 
+// ─── zoom presets ─────────────────────────────────────────────────────────────
+
+const ZOOM_PRESETS = [
+  { label: '0.5×', value: 0 },
+  { label: '1×',   value: 0.10 },
+  { label: '1.5×', value: 0.15 },
+  { label: '2×',   value: 0.20 },
+] as const;
+
 // ─── types ────────────────────────────────────────────────────────────────────
 
 type Phase  = 'capture' | 'preview' | 'success';
@@ -131,6 +142,7 @@ export default function CameraScreen() {
   const { t } = useAppTranslation();
   const { addPhoto, petName, petType, mood, userId, addBadges, petPrimaryColor } = usePet();
   const { user, session } = useAuth();
+  const queryClient = useQueryClient();
 
   const [phase, setPhase]               = useState<Phase>('capture');
   const [capturedUri, setCapturedUri]   = useState<string | null>(null);
@@ -138,17 +150,33 @@ export default function CameraScreen() {
   const [isConfirming, setIsConfirming] = useState(false);
 
   // ── zoom & focus (capture phase) ────────────────────────────────────────────
-  const [zoom, setZoom]           = useState(0);
+  const [zoom, setZoom]             = useState(0.05);
+  const [activePreset, setActivePreset] = useState(1); // index into ZOOM_PRESETS; 1 = '1×'
   const [focusPoint, setFocusPoint] = useState<{ x: number; y: number } | null>(null);
   const zoomBase       = useRef(0);
   const focusOpacity   = useRef(new Animated.Value(0)).current;
   const focusRingScale = useRef(new Animated.Value(1)).current;
   const cameraRef      = useRef<CameraView>(null);
 
+  // ── partnership (reuses cached query from group.tsx) ────────────────────────
+  const { data: activePartnership } = useQuery({
+    queryKey: ['myPartnership', userId],
+    queryFn: () => getMyPartnership(userId!),
+    enabled: !!userId,
+    staleTime: 30_000,
+    gcTime: 24 * 60 * 60 * 1000,
+  });
+
   // ── success animations ───────────────────────────────────────────────────────
-  const successAnim = useRef(new Animated.Value(0)).current;
-  const bounceAnim  = useRef(new Animated.Value(0)).current;
-  const jumpAnim    = useRef(new Animated.Value(0)).current;
+  const successAnim      = useRef(new Animated.Value(0)).current;
+  const bounceAnim       = useRef(new Animated.Value(0)).current;
+  const jumpAnim         = useRef(new Animated.Value(0)).current;
+  const wiggleAnim       = useRef(new Animated.Value(0)).current;
+  const heartAnim1       = useRef(new Animated.Value(0)).current;
+  const heartAnim2       = useRef(new Animated.Value(0)).current;
+  const heartAnim3       = useRef(new Animated.Value(0)).current;
+  const sparkleRotAnim   = useRef(new Animated.Value(0)).current;
+  const partnerBannerAnim = useRef(new Animated.Value(0)).current;
 
   // ── preview: rotation ────────────────────────────────────────────────────────
   const [rotDeg, setRotDeg]   = useState(0);   // 0 / 90 / 180 / 270 (display state)
@@ -200,19 +228,66 @@ export default function CameraScreen() {
     );
   }, [phase, capturedUri, imgNatural]);
 
-  // ── success hop animation ────────────────────────────────────────────────────
+  // ── success animations ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (phase !== 'success') { jumpAnim.setValue(0); return; }
+    if (phase !== 'success') {
+      jumpAnim.setValue(0);
+      wiggleAnim.setValue(0);
+      heartAnim1.setValue(0);
+      heartAnim2.setValue(0);
+      heartAnim3.setValue(0);
+      sparkleRotAnim.setValue(0);
+      partnerBannerAnim.setValue(0);
+      return;
+    }
+
+    // Bigger hop with a side wiggle
     const hop = Animated.loop(
       Animated.sequence([
-        Animated.timing(jumpAnim, { toValue: -32, duration: 260, useNativeDriver: true }),
-        Animated.spring(jumpAnim, { toValue: 0, friction: 4, tension: 220, useNativeDriver: true }),
-        Animated.delay(180),
+        Animated.timing(jumpAnim, { toValue: -46, duration: 220, useNativeDriver: true }),
+        Animated.spring(jumpAnim, { toValue: 0, friction: 4, tension: 200, useNativeDriver: true }),
+        Animated.delay(240),
       ])
     );
-    hop.start();
-    return () => hop.stop();
-  }, [phase]);
+    const wiggle = Animated.loop(
+      Animated.sequence([
+        Animated.delay(200),
+        Animated.timing(wiggleAnim, { toValue: 9,  duration: 75,  useNativeDriver: true }),
+        Animated.timing(wiggleAnim, { toValue: -9, duration: 75,  useNativeDriver: true }),
+        Animated.timing(wiggleAnim, { toValue: 6,  duration: 65,  useNativeDriver: true }),
+        Animated.timing(wiggleAnim, { toValue: 0,  duration: 65,  useNativeDriver: true }),
+        Animated.delay(260),
+      ])
+    );
+
+    // Floating hearts (each resets and floats up on loop)
+    const floatHeart = (anim: Animated.Value, delay: number) => {
+      anim.setValue(0);
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(anim, { toValue: 1, duration: 1100, useNativeDriver: true }),
+          Animated.delay(500),
+        ])
+      );
+    };
+    const h1 = floatHeart(heartAnim1, 0);
+    const h2 = floatHeart(heartAnim2, 380);
+    const h3 = floatHeart(heartAnim3, 740);
+
+    // Slow sparkle spin
+    const spin = Animated.loop(
+      Animated.timing(sparkleRotAnim, { toValue: 1, duration: 3200, useNativeDriver: true })
+    );
+
+    // Partner banner slide-up
+    const banner = Animated.spring(partnerBannerAnim, {
+      toValue: 1, friction: 7, tension: 100, useNativeDriver: true,
+    });
+
+    hop.start(); wiggle.start(); h1.start(); h2.start(); h3.start(); spin.start(); banner.start();
+    return () => { hop.stop(); wiggle.stop(); h1.stop(); h2.stop(); h3.stop(); spin.stop(); };
+  }, [phase, jumpAnim, wiggleAnim, heartAnim1, heartAnim2, heartAnim3, sparkleRotAnim, partnerBannerAnim]);
 
   // ── PanResponders for crop corners ───────────────────────────────────────────
   const updateCorner = (corner: string, dx: number, dy: number) => {
@@ -397,12 +472,20 @@ export default function CameraScreen() {
             if (userId && result.nutrients.length > 0) await addBadges(nutrients);
           }
           if (userId && user?.id === userId) {
-            await uploadPetPhoto(uploadUri, userId, result.success ? { nutrients, calorie } : undefined);
+            const uploaded = await uploadPetPhoto(uploadUri, userId, result.success ? { nutrients, calorie } : undefined);
             cloudUploadDone = true;
+            queryClient.setQueryData<import('@/lib/supabase-photos').PetPhoto[]>(
+              ['albumPhotos', userId],
+              (prev) => [uploaded, ...(prev ?? [])],
+            );
           }
         } else if (userId && user?.id === userId) {
-          await uploadPetPhoto(uploadUri, userId);
+          const uploaded = await uploadPetPhoto(uploadUri, userId);
           cloudUploadDone = true;
+          queryClient.setQueryData<import('@/lib/supabase-photos').PetPhoto[]>(
+            ['albumPhotos', userId],
+            (prev) => [uploaded, ...(prev ?? [])],
+          );
         }
 
         if (cloudUploadDone && userId) {
@@ -414,7 +497,7 @@ export default function CameraScreen() {
         console.error('[Camera] Background analysis/upload error:', e);
       }
     })();
-  }, [isConfirming, addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session]);
+  }, [isConfirming, addPhoto, addBadges, successAnim, bounceAnim, capturedUri, userId, user?.id, session, queryClient]);
 
   const handleContinue = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -425,12 +508,12 @@ export default function CameraScreen() {
   const showFocusRing = useCallback((screenX: number, screenY: number) => {
     setFocusPoint({ x: screenX, y: screenY });
     focusOpacity.setValue(1);
-    focusRingScale.setValue(1.5);
+    focusRingScale.setValue(1.25);
     Animated.parallel([
-      Animated.spring(focusRingScale, { toValue: 1, friction: 6, tension: 120, useNativeDriver: true }),
+      Animated.spring(focusRingScale, { toValue: 1, friction: 8, tension: 160, useNativeDriver: true }),
       Animated.sequence([
-        Animated.delay(800),
-        Animated.timing(focusOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.delay(1500),
+        Animated.timing(focusOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
       ]),
     ]).start(() => setFocusPoint(null));
   }, [focusOpacity, focusRingScale]);
@@ -439,6 +522,7 @@ export default function CameraScreen() {
     .onBegin(() => { zoomBase.current = zoom; })
     .onUpdate((e) => {
       setZoom(Math.min(1, Math.max(0, zoomBase.current + (e.scale - 1) * 0.4)));
+      setActivePreset(-1);
     });
 
   const tapGesture = Gesture.Tap()
@@ -454,22 +538,75 @@ export default function CameraScreen() {
   // SUCCESS
   // ════════════════════════════════════════════════════════════════════════════
   if (phase === 'success') {
+    const sparkleRotDeg = sparkleRotAnim.interpolate({
+      inputRange: [0, 1], outputRange: ['0deg', '360deg'],
+    });
+    const makeHeartStyle = (anim: Animated.Value, xOffset: number) => ({
+      transform: [
+        { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, -90] }) },
+        { translateX: xOffset },
+      ],
+      opacity: anim.interpolate({ inputRange: [0, 0.15, 0.7, 1], outputRange: [0, 1, 1, 0] }),
+    });
+
     return (
       <View style={[styles.container, { backgroundColor: '#FFF8F0' }]}>
-        <View style={styles.successPage}>
-          <View style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24, flex: 1 }}>
-            <Animated.View style={{ alignSelf: 'center', transform: [{ translateY: jumpAnim }] }}>
-              <PetPortrait petType={petType ?? 'mochi'} mood={mood} primaryColor={petPrimaryColor} style={styles.petImage} />
-            </Animated.View>
+        <View style={[styles.successPage, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
+
+          {/* Upper 2/3 — pet + title + partner banner */}
+          <View style={styles.successUpper}>
+            {/* Pet with hop + wiggle */}
+            <View style={styles.petWrap}>
+              <Animated.View style={{ alignSelf: 'center', transform: [{ translateY: jumpAnim }, { rotate: wiggleAnim.interpolate({ inputRange: [-9, 9], outputRange: ['-9deg', '9deg'] }) }] }}>
+                <PetPortrait petType={petType ?? 'mochi'} mood={mood} primaryColor={petPrimaryColor} style={styles.petImage} />
+              </Animated.View>
+
+              {/* Floating hearts */}
+              <Animated.View style={[styles.floatingHeart, makeHeartStyle(heartAnim1, -28)]} pointerEvents="none">
+                <Heart size={20} color="#FF6B9D" fill="#FF6B9D" />
+              </Animated.View>
+              <Animated.View style={[styles.floatingHeart, makeHeartStyle(heartAnim2, 8)]} pointerEvents="none">
+                <Heart size={14} color={Colors.softOrange} fill={Colors.softOrange} />
+              </Animated.View>
+              <Animated.View style={[styles.floatingHeart, makeHeartStyle(heartAnim3, 32)]} pointerEvents="none">
+                <Heart size={18} color="#FF6B9D" fill="#FF6B9D" />
+              </Animated.View>
+            </View>
+
+            {/* Title + subtitle */}
             <Animated.View style={[styles.successContent, { transform: [{ scale: successAnim }, { translateY: bounceAnim }] }]}>
-              <Sparkles size={48} color={Colors.softOrange} />
+              <Animated.View style={{ transform: [{ rotate: sparkleRotDeg }] }}>
+                <Sparkles size={48} color={Colors.softOrange} />
+              </Animated.View>
               <Text style={styles.successTitle}>{t('camera.lovedTitle', { name: petName })}</Text>
               <Text style={styles.successSubtitle}>{t('camera.happinessBoosted')}</Text>
             </Animated.View>
+
+            {/* Partner banner */}
+            {activePartnership && (
+              <Animated.View style={[
+                styles.partnerBanner,
+                {
+                  opacity: partnerBannerAnim,
+                  transform: [{ translateY: partnerBannerAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+                },
+              ]}>
+                <Users size={16} color={Colors.softOrange} />
+                <Text style={styles.partnerBannerText}>
+                  {t('camera.partnerWillSee')}
+                </Text>
+              </Animated.View>
+            )}
+          </View>
+
+          {/* Lower 1/3 — continue button + nutrition hint */}
+          <View style={styles.successLower}>
             <Pressable style={styles.continueBtn} onPress={handleContinue} testID="success-continue-button">
               <Text style={styles.continueBtnText}>{t('common.continue')}</Text>
             </Pressable>
+            <Text style={styles.nutritionHint}>{t('camera.nutritionInGallery')}</Text>
           </View>
+
         </View>
       </View>
     );
@@ -531,7 +668,6 @@ export default function CameraScreen() {
                 Image.getSize(
                   capturedUri!,
                   (gsW, gsH) => {
-                    console.log('[Preview] dimensions — onLoad:', { width, height }, 'getSize:', { gsW, gsH });
                     imgNaturalRef.current = { w: gsW, h: gsH };
                     setImgNatural({ w: gsW, h: gsH });
                   },
@@ -634,32 +770,60 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" zoom={zoom} />
 
-      <GestureDetector gesture={cameraGestures}>
-        <View style={StyleSheet.absoluteFill} />
-      </GestureDetector>
+      {/* ── Top black bar ──────────────────────────────────────────────────── */}
+      <View style={[styles.cameraTopBar, { paddingTop: insets.top }]}>
+        <Pressable
+          onPress={() => router.back()}
+          style={styles.topBarBtn}
+          testID="close-camera"
+        >
+          <X size={22} color="#FFF" />
+        </Pressable>
+      </View>
 
-      {focusPoint && (
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.focusRing, {
-            left: focusPoint.x - 32, top: focusPoint.y - 32,
-            opacity: focusOpacity,
-            transform: [{ scale: focusRingScale }],
-          }]}
-        />
-      )}
+      {/* ── Camera viewport — 3:4 portrait ratio ───────────────────────────── */}
+      <View style={styles.cameraViewport}>
+        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" zoom={zoom} />
+        <GestureDetector gesture={cameraGestures}>
+          <View style={StyleSheet.absoluteFill} />
+        </GestureDetector>
+        {focusPoint && (
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.focusRing, {
+              left: focusPoint.x - 40, top: focusPoint.y - 40,
+              opacity: focusOpacity,
+              transform: [{ scale: focusRingScale }],
+            }]}
+          />
+        )}
 
-      <Pressable
-        onPress={() => router.back()}
-        style={[styles.overlayBtn, styles.overlayBtnDark, { top: insets.top + 12, left: 16 }]}
-        testID="close-camera"
-      >
-        <X size={22} color="#FFF" />
-      </Pressable>
+        {/* ── Zoom preset buttons ──────────────────────────────────────────── */}
+        <View style={styles.zoomPresets} pointerEvents="box-none">
+          {ZOOM_PRESETS.map((preset, i) => {
+            const active = activePreset === i;
+            return (
+              <Pressable
+                key={preset.label}
+                style={[styles.zoomPresetBtn, active && styles.zoomPresetBtnActive]}
+                onPress={() => {
+                  setZoom(preset.value);
+                  setActivePreset(i);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+              >
+                <Text style={[styles.zoomPresetText, active && styles.zoomPresetTextActive]}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
 
-      <View style={[styles.captureBar, { paddingBottom: insets.bottom + 24 }]}>
+      {/* ── Bottom black bar ───────────────────────────────────────────────── */}
+      <View style={[styles.captureBar, { paddingBottom: insets.bottom + 16 }]}>
         <Pressable style={styles.galleryThumbBtn} onPress={handlePickFromGallery} testID="gallery-button">
           <ImagePlus size={26} color="#FFF" />
         </Pressable>
@@ -676,7 +840,7 @@ export default function CameraScreen() {
 
 // ─── constants ────────────────────────────────────────────────────────────────
 const HIT = 44; // touch-target size for crop corner handles
-const DOT = 16; // visual dot size for crop corner handles
+const DOT = 32; // visual dot size for crop corner handles
 
 // ─── styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
@@ -691,13 +855,61 @@ const styles = StyleSheet.create({
 
   // ── focus ring ─────────────────────────────────────────────────────────────
   focusRing: {
-    position: 'absolute', width: 64, height: 64, borderRadius: 32,
-    borderWidth: 2, borderColor: '#FFD700', zIndex: 20,
+    position: 'absolute', width: 80, height: 80, borderRadius: 1,
+    borderWidth: 1.5, borderColor: '#FFD60A', zIndex: 20,
+  },
+
+  // ── top bar ────────────────────────────────────────────────────────────────
+  cameraTopBar: {
+    backgroundColor: '#000',
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  topBarBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    justifyContent: 'center', alignItems: 'center',
+  },
+
+  // ── camera viewport ────────────────────────────────────────────────────────
+  cameraViewport: {
+    width: '100%',
+    aspectRatio: 3 / 4,  // portrait 4:3 ratio
+    overflow: 'hidden',
+  },
+
+  // ── zoom presets ───────────────────────────────────────────────────────────
+  zoomPresets: {
+    position: 'absolute',
+    bottom: 18,
+    left: 0,
+    right: 0,
+    flexDirection: 'row' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+  },
+  zoomPresetBtn: {
+    paddingHorizontal: 13,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  zoomPresetBtnActive: {
+    backgroundColor: 'rgba(255,214,10,0.92)',
+  },
+  zoomPresetText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#FFF',
+  },
+  zoomPresetTextActive: {
+    color: '#000',
   },
 
   // ── capture bar ────────────────────────────────────────────────────────────
   captureBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flex: 1,
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between', paddingHorizontal: 40, paddingTop: 20,
   },
@@ -805,12 +1017,39 @@ const styles = StyleSheet.create({
 
   // ── success ────────────────────────────────────────────────────────────────
   successPage:    { flex: 1, paddingHorizontal: 20 },
+  successUpper:   { flex: 2, justifyContent: 'center' },
+  successLower:   { flex: 1, justifyContent: 'flex-start', paddingTop: 4 },
+  nutritionHint: {
+    marginTop: 14, fontSize: 13, color: Colors.gray,
+    textAlign: 'center', lineHeight: 18,
+  },
+  petWrap: {
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    height: 180,
+    marginBottom: 8,
+  },
   petImage:       { width: 140, height: 140 },
-  successContent: { alignItems: 'center', gap: 16, marginTop: 8 },
+  floatingHeart: {
+    position: 'absolute',
+    bottom: 140,
+  },
+  successContent: { alignItems: 'center', gap: 16, marginTop: 4 },
   successTitle:   { fontSize: 28, fontWeight: '800', color: Colors.darkBrown },
   successSubtitle:{ fontSize: 18, color: Colors.softOrange, fontWeight: '600' },
+  partnerBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, marginTop: 20,
+    paddingVertical: 12, paddingHorizontal: 20, borderRadius: 16,
+    backgroundColor: 'rgba(232,152,94,0.12)',
+    borderWidth: 1.5, borderColor: 'rgba(232,152,94,0.25)',
+  },
+  partnerBannerText: {
+    fontSize: 15, fontWeight: '600', color: Colors.darkBrown,
+  },
   continueBtn: {
-    marginTop: 28, alignSelf: 'stretch', backgroundColor: Colors.softOrange,
+    alignSelf: 'stretch', backgroundColor: Colors.softOrange,
     paddingVertical: 16, borderRadius: 18, alignItems: 'center',
     shadowColor: Colors.softOrange, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25, shadowRadius: 10, elevation: 5,

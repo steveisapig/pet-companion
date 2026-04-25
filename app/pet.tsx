@@ -9,8 +9,9 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
+  TextInput,
 } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -51,6 +52,19 @@ import PetPortrait from '@/components/PetPortrait';
 import { useOnboarding } from '@/providers/OnboardingProvider';
 import { usePet } from '@/providers/PetProvider';
 import { useAuth } from '@/providers/AuthProvider';
+import {
+  getMyUsername,
+  setMyUsername,
+  isValidUsername,
+  normaliseUsername,
+  checkUsernameAvailable,
+} from '@/lib/user-info';
+import {
+  getUsernamePromptDismissed,
+  setUsernamePromptDismissed,
+} from '@/lib/onboarding-storage';
+
+const IS_DEV = process.env.EXPO_PUBLIC_IS_DEV === 'true';
 
 const hasSupabaseConfig = () =>
   !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
@@ -178,6 +192,7 @@ export default function PetScreen() {
     level, expProgress, justLeveledUp, clearLevelUp,
     petPrimaryColor,
     setPetPrimaryColor,
+    username,
   } = usePet();
 
   const {
@@ -230,6 +245,63 @@ export default function PetScreen() {
   const { signOut, session } = useAuth();
   const { step: onboardingStep, advanceStep, startOnboarding } = useOnboarding();
 
+  // ── Username prompt ──────────────────────────────────────────────────────────
+  // Start as true (hidden) until AsyncStorage confirms it hasn't been dismissed.
+  const [usernamePromptSkipped, setUsernamePromptSkipped] = useState(true);
+  useEffect(() => {
+    getUsernamePromptDismissed().then((dismissed) => {
+      if (!dismissed) setUsernamePromptSkipped(false);
+    });
+  }, []);
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [savingUsername, setSavingUsername] = useState(false);
+
+  const { data: myUsername, isSuccess: myUsernameLoaded } = useQuery({
+    queryKey: ['myUsername', userId],
+    queryFn: () => getMyUsername(userId!),
+    enabled: !!userId && hasSupabaseConfig(),
+    staleTime: Infinity,
+  });
+
+  const showUsernamePrompt =
+    !usernamePromptSkipped &&
+    !!userId &&
+    hasSupabaseConfig() &&
+    myUsernameLoaded &&
+    myUsername === null;
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!showUsernamePrompt) return;
+    if (!usernameInput) { setUsernameAvailable(null); return; }
+    const normalised = normaliseUsername(usernameInput);
+    if (!isValidUsername(normalised)) { setUsernameAvailable(null); return; }
+    setCheckingUsername(true);
+    const id = setTimeout(() => {
+      checkUsernameAvailable(normalised).then((ok) => {
+        setUsernameAvailable(ok);
+        setCheckingUsername(false);
+      });
+    }, 600);
+    return () => clearTimeout(id);
+  }, [usernameInput, showUsernamePrompt]);
+
+  const handleSaveUsername = useCallback(async () => {
+    if (!userId || !usernameInput.trim() || !usernameAvailable) return;
+    setSavingUsername(true);
+    const err = await setMyUsername(userId, usernameInput);
+    setSavingUsername(false);
+    if (err) {
+      Alert.alert('Could not save', err);
+      return;
+    }
+    queryClient.setQueryData(['myUsername', userId], normaliseUsername(usernameInput));
+  }, [userId, usernameInput, usernameAvailable, queryClient]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const bounceAnim = useRef(new Animated.Value(0)).current;
   const petScale = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
@@ -239,6 +311,7 @@ export default function PetScreen() {
   const levelUpOpacity = useRef(new Animated.Value(0)).current;
   const onboardingArrowPulse = useRef(new Animated.Value(0)).current;
   const nutritionFlashAnim = useRef(new Animated.Value(0)).current;
+  const menuSlideAnim = useRef(new Animated.Value(-180)).current;
   const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; x: number; anim: Animated.Value }[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [nutritionAnalysisVisible, setNutritionAnalysisVisible] = useState(false);
@@ -448,49 +521,60 @@ export default function PetScreen() {
     router.push('/album');
   }, [onboardingStep, advanceStep]);
 
+  const openMenu = useCallback(() => {
+    menuSlideAnim.setValue(-180);
+    setMenuOpen(true);
+    Animated.timing(menuSlideAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
+  }, [menuSlideAnim]);
+
+  const closeMenu = useCallback((onDone?: () => void) => {
+    Animated.timing(menuSlideAnim, { toValue: -180, duration: 200, useNativeDriver: true })
+      .start(() => {
+        setMenuOpen(false);
+        onDone?.();
+      });
+  }, [menuSlideAnim]);
+
   const handleInventory = useCallback(async () => {
-    setMenuOpen(false);
+    closeMenu();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onboardingStep === 2) await advanceStep();
     router.push('/inventory');
   }, [onboardingStep, advanceStep]);
 
   const handleItems = useCallback(() => {
-    setMenuOpen(false);
+    closeMenu(() => router.push('/items'));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/items');
-  }, []);
+  }, [closeMenu]);
 
   const handleStreak = useCallback(async () => {
-    setMenuOpen(false);
+    closeMenu(() => router.push('/streak'));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/streak');
-  }, []);
+  }, [closeMenu]);
 
   const handleRestartOnboardingDev = useCallback(async () => {
-    setMenuOpen(false);
+    closeMenu();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await startOnboarding();
-  }, [startOnboarding]);
+  }, [closeMenu, startOnboarding]);
 
   const handleLogOut = useCallback(async () => {
-    setMenuOpen(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await signOut();
-    router.replace('/sign-in');
-  }, [signOut]);
+    closeMenu(async () => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await signOut();
+      router.replace('/sign-in');
+    });
+  }, [closeMenu, signOut]);
 
   const handleGroup = useCallback(() => {
-    setMenuOpen(false);
+    closeMenu(() => router.push('/group'));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/group');
-  }, []);
+  }, [closeMenu]);
 
   const handleSettings = useCallback(async () => {
-    setMenuOpen(false);
+    closeMenu(() => router.push('/settings'));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push('/settings');
-  }, []);
+  }, [closeMenu]);
 
   const closeNutritionAnalysis = useCallback(() => {
     setNutritionAnalysisVisible(false);
@@ -660,7 +744,7 @@ export default function PetScreen() {
           <View style={styles.topBarLeft}>
             <Pressable
               style={styles.menuBtn}
-              onPress={() => setMenuOpen(true)}
+              onPress={openMenu}
               testID="menu-button"
             >
               <Menu size={22} color={Colors.darkBrown} />
@@ -671,7 +755,7 @@ export default function PetScreen() {
             </View>
           </View>
           <View style={styles.statsRow}>
-            {shouldShowFlashyNutritionButton && (
+            {IS_DEV && shouldShowFlashyNutritionButton && (
               <Animated.View
                 style={[
                   styles.nutritionTopRightWrap,
@@ -847,7 +931,7 @@ export default function PetScreen() {
                 : t('pet.tapHint.default')}
           </Text>
 
-          <View style={styles.colorThemeRow}>
+          {IS_DEV && <View style={styles.colorThemeRow}>
             {[
               { label: 'Original', color: null },
               { label: 'Red',      color: '#E57373' },
@@ -875,7 +959,7 @@ export default function PetScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </View>}
         </View>
 
         {justLeveledUp && (
@@ -985,43 +1069,142 @@ export default function PetScreen() {
           </Pressable>
         </Modal>
 
-        <Modal visible={menuOpen} transparent animationType="fade">
-          <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
-            <View style={[styles.menuPanel, { top: insets.top + 50 }]}>
-              <Pressable style={styles.menuItem} onPress={handleInventory}>
-                <Package size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>{t('pet.menu.badges')}</Text>
-              </Pressable>
-              <Pressable style={styles.menuItem} onPress={handleItems}>
-                <Star size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>{t('pet.menu.items')}</Text>
-              </Pressable>
-              <Pressable style={styles.menuItem} onPress={handleStreak}>
-                <Flame size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>{t('pet.menu.streak')}</Text>
-              </Pressable>
-              <Pressable style={styles.menuItem} onPress={handleGroup}>
-                <Users size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>Partner</Text>
-              </Pressable>
-              <Pressable style={styles.menuItem} onPress={handleSettings}>
-                <Settings size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>
-                  {t('pet.menu.settings', { defaultValue: 'Settings' })}
-                </Text>
-              </Pressable>
-              {__DEV__ && (
-                <Pressable style={styles.menuItem} onPress={handleRestartOnboardingDev} testID="dev-restart-onboarding">
-                  <RotateCcw size={20} color={Colors.darkBrown} />
-                  <Text style={styles.menuItemText}>{t('pet.menu.replayOnboarding')}</Text>
+        <Modal visible={menuOpen} transparent animationType="none">
+          <View style={styles.menuBackdrop}>
+            {/* Slide-in drawer */}
+            <Animated.View
+              style={[styles.menuDrawer, { transform: [{ translateX: menuSlideAnim }], paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 }]}
+            >
+              {/* Nav items */}
+              <View style={styles.menuItemList}>
+                <Pressable style={styles.menuItem} onPress={handleInventory}>
+                  <Package size={20} color={Colors.darkBrown} />
+                  <Text style={styles.menuItemText}>{t('pet.menu.badges')}</Text>
                 </Pressable>
+                {__DEV__ && (
+                  <Pressable style={styles.menuItem} onPress={handleItems}>
+                    <Star size={20} color={Colors.darkBrown} />
+                    <Text style={styles.menuItemText}>{t('pet.menu.items')}</Text>
+                  </Pressable>
+                )}
+                <Pressable style={styles.menuItem} onPress={handleStreak}>
+                  <Flame size={20} color={Colors.darkBrown} />
+                  <Text style={styles.menuItemText}>{t('pet.menu.streak')}</Text>
+                </Pressable>
+                <Pressable style={styles.menuItem} onPress={handleGroup}>
+                  <Users size={20} color={Colors.darkBrown} />
+                  <Text style={styles.menuItemText}>{t('pet.menu.partner')}</Text>
+                </Pressable>
+                <Pressable style={styles.menuItem} onPress={handleSettings}>
+                  <Settings size={20} color={Colors.darkBrown} />
+                  <Text style={styles.menuItemText}>
+                    {t('pet.menu.settings', { defaultValue: 'Settings' })}
+                  </Text>
+                </Pressable>
+                {IS_DEV && (
+                  <Pressable style={styles.menuItem} onPress={handleRestartOnboardingDev} testID="dev-restart-onboarding">
+                    <RotateCcw size={20} color={Colors.darkBrown} />
+                    <Text style={styles.menuItemText}>{t('pet.menu.replayOnboarding')}</Text>
+                  </Pressable>
+                )}
+              </View>
+
+              {/* Bottom: username + logout */}
+              <View style={styles.menuDrawerBottom}>
+                {username ? (
+                  <Text
+                    style={styles.menuUsernameText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.6}
+                  >
+                    @{username}
+                  </Text>
+                ) : null}
+                <Pressable style={styles.menuLogoutBtn} onPress={handleLogOut}>
+                  <LogOut size={18} color="#E53935" />
+                  <Text style={styles.menuLogoutText}>{t('pet.menu.logOut')}</Text>
+                </Pressable>
+              </View>
+            </Animated.View>
+
+            {/* Tap backdrop to close */}
+            <Pressable style={styles.menuBackdropTap} onPress={() => closeMenu()} />
+          </View>
+        </Modal>
+
+        {/* ── Username prompt gate ───────────────────────────────────────────── */}
+        <Modal visible={showUsernamePrompt} transparent animationType="fade">
+          <View style={styles.levelUpOverlay}>
+            <View style={styles.usernameModalCard}>
+              <Text style={styles.usernameModalTitle}>
+                {t('onboarding.chooseHandle')}
+              </Text>
+              <Text style={styles.usernameModalSubtitle}>
+                {t('onboarding.handleSubtitle')}
+              </Text>
+
+              <View style={styles.handleInputRow}>
+                <Text style={styles.handlePrefix}>@</Text>
+                <TextInput
+                  style={styles.handleInput}
+                  value={usernameInput}
+                  onChangeText={(v) => {
+                    setUsernameInput(v.toLowerCase().replace(/[^a-z0-9._]/g, ''));
+                    setUsernameAvailable(null);
+                  }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="your_handle"
+                  placeholderTextColor={Colors.brown + '66'}
+                  maxLength={20}
+                />
+              </View>
+
+              {checkingUsername && (
+                <ActivityIndicator size="small" color={Colors.softOrange} style={{ marginTop: 6 }} />
               )}
-              <Pressable style={styles.menuItem} onPress={handleLogOut}>
-                <LogOut size={20} color={Colors.darkBrown} />
-                <Text style={styles.menuItemText}>{t('pet.menu.logOut')}</Text>
+              {!checkingUsername && usernameAvailable === true && (
+                <Text style={[styles.handleStatus, styles.handleAvailableText]}>
+                  {t('onboarding.handleAvailable')}
+                </Text>
+              )}
+              {!checkingUsername && usernameAvailable === false && (
+                <Text style={[styles.handleStatus, styles.handleTakenText]}>
+                  {t('onboarding.handleTaken')}
+                </Text>
+              )}
+              {!checkingUsername && usernameAvailable === null && usernameInput.length > 0 && (
+                <Text style={styles.handleHintText}>
+                  {t('onboarding.handleFormatHint')}
+                </Text>
+              )}
+
+              <Pressable
+                style={[
+                  styles.usernameModalBtn,
+                  (usernameAvailable !== true || savingUsername) && styles.usernameModalBtnDisabled,
+                ]}
+                onPress={handleSaveUsername}
+                disabled={usernameAvailable !== true || savingUsername}
+              >
+                {savingUsername
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Text style={styles.usernameModalBtnText}>{t('onboarding.letsGo')}</Text>
+                }
+              </Pressable>
+
+              <Pressable
+                style={styles.usernameSkipBtn}
+                onPress={() => {
+                  setUsernamePromptDismissed();
+                  setUsernamePromptSkipped(true);
+                }}
+              >
+                <Text style={styles.usernameSkipText}>{t('onboarding.skipForNow')}</Text>
               </Pressable>
             </View>
-          </Pressable>
+          </View>
         </Modal>
 
         <View style={styles.bottomActions}>
@@ -1643,32 +1826,62 @@ const styles = StyleSheet.create({
   },
   menuBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    flexDirection: 'row' as const,
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
-  menuPanel: {
-    position: 'absolute' as const,
-    left: 20,
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    paddingVertical: 8,
-    minWidth: 180,
+  menuDrawer: {
+    width: 200,
+    backgroundColor: '#FFFAF5',
+    flexDirection: 'column' as const,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 4, height: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  menuItemList: {
+    flex: 1,
   },
   menuItem: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
+    gap: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
   menuItemText: {
-    fontSize: 16,
+    fontSize: 24,
     fontWeight: '600' as const,
     color: Colors.darkBrown,
+  },
+  menuDrawerBottom: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(212,165,116,0.25)',
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    gap: 10,
+  },
+  menuUsernameText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.brown,
+  },
+  menuLogoutBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(229,57,53,0.08)',
+  },
+  menuLogoutText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#E53935',
+  },
+  menuBackdropTap: {
+    flex: 1,
   },
   onboardingCard: {
     backgroundColor: 'rgba(255,255,255,0.98)',
@@ -1715,5 +1928,97 @@ const styles = StyleSheet.create({
     position: 'absolute' as const,
     width: 18,
     height: 11,
+  },
+  usernameModalCard: {
+    width: '86%',
+    maxWidth: 360,
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 28,
+    alignItems: 'stretch' as const,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  usernameModalTitle: {
+    fontSize: 22,
+    fontWeight: '800' as const,
+    color: Colors.darkBrown,
+    textAlign: 'center' as const,
+    marginBottom: 6,
+  },
+  usernameModalSubtitle: {
+    fontSize: 14,
+    color: Colors.brown,
+    textAlign: 'center' as const,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  handleInputRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    borderWidth: 1.5,
+    borderColor: Colors.beige,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFF9F4',
+    marginBottom: 8,
+  },
+  handlePrefix: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: Colors.brown,
+    marginRight: 2,
+  },
+  handleInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.darkBrown,
+    paddingVertical: 12,
+  },
+  handleStatus: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    marginBottom: 12,
+  },
+  handleAvailableText: {
+    color: '#34A853',
+  },
+  handleTakenText: {
+    color: '#EA4335',
+  },
+  handleHintText: {
+    fontSize: 12,
+    color: Colors.brown,
+    opacity: 0.7,
+    marginBottom: 12,
+  },
+  usernameModalBtn: {
+    backgroundColor: Colors.softOrange,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+    marginTop: 12,
+  },
+  usernameModalBtnDisabled: {
+    opacity: 0.45,
+  },
+  usernameModalBtnText: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#FFF',
+  },
+  usernameSkipBtn: {
+    alignItems: 'center' as const,
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  usernameSkipText: {
+    fontSize: 14,
+    color: Colors.brown,
+    textDecorationLine: 'underline' as const,
+    opacity: 0.7,
   },
 });

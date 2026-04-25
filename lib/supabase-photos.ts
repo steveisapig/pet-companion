@@ -305,6 +305,69 @@ export async function getPetPhotosForLocalCalendarDay(
 }
 
 /**
+ * Fetch photos for two users (self + partner) since a given ISO timestamp.
+ * Returns two arrays keyed by userId.  Requires the pet_photos_select_partner
+ * RLS policy (migration 20260423030000) so the partner's rows are visible.
+ *
+ * @param myUserId      The calling user's ID
+ * @param partnerUserId The partner's user ID
+ * @param sinceIso      ISO timestamp — only photos at or after this time are returned
+ * @param limit         Max photos per user (default 50)
+ */
+export async function getPartnershipPhotos(
+  myUserId: string,
+  partnerUserId: string,
+  sinceIso: string,
+  limit = 50,
+): Promise<{ mine: PetPhoto[]; partner: PetPhoto[] }> {
+  const { data, error } = await supabaseClient
+    .from('pet_photos')
+    .select('*')
+    .in('user_id', [myUserId, partnerUserId])
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+    .limit(limit * 2); // fetch up to limit per user; we'll split client-side
+
+  if (error) {
+    dbLog('SELECT', 'pet_photos', {
+      params: { myUserId, partnerUserId, sinceIso },
+      error,
+      message: `getPartnershipPhotos failed: ${error.message}`,
+    });
+    return { mine: [], partner: [] };
+  }
+
+  const rows = (data ?? []) as {
+    id: number;
+    user_id: string;
+    pet_id: number;
+    storage_path: string;
+    created_at: string;
+    nutrients?: number[] | null;
+    calories?: number | null;
+  }[];
+
+  const toPhoto = (row: (typeof rows)[number]): PetPhoto => {
+    const { data: urlData } = supabaseClient.storage.from(BUCKET).getPublicUrl(row.storage_path);
+    return {
+      ...row,
+      nutrients: row.nutrients ?? null,
+      calories: row.calories ?? null,
+      url: urlData?.publicUrl ?? '',
+    };
+  };
+
+  const mine: PetPhoto[] = [];
+  const partner: PetPhoto[] = [];
+  for (const row of rows) {
+    if (row.user_id === myUserId) mine.push(toPhoto(row));
+    else partner.push(toPhoto(row));
+  }
+
+  return { mine: mine.slice(0, limit), partner: partner.slice(0, limit) };
+}
+
+/**
  * Photos whose `created_at` falls within a supplied ISO datetime range.
  */
 export async function getPetPhotosInDateRange(

@@ -67,7 +67,7 @@ function RootLayoutNav() {
       <Stack.Screen name="inventory" />
       <Stack.Screen name="items" />
       <Stack.Screen name="streak" />
-      <Stack.Screen name="settings" />
+      <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
       <Stack.Screen name="camera" options={{ gestureEnabled: false }} />
       <Stack.Screen name="album" />
       <Stack.Screen name="group" />

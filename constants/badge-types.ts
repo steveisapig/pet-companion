@@ -41,7 +41,7 @@ export const ITEM_TYPE_EMOJI: Record<number, string> = {
   0: '🍊',
   1: '☀️',
   2: '🥕',
-  3: '🥩',
+  3: '🥚',
   4: '🥔',
   5: '🥜',
   6: '🥬',

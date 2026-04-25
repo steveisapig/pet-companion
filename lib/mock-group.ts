@@ -17,9 +17,8 @@ export const MAX_PARTNERS = 1;
 
 export type GroupGoalType =
   | 'nutrients'     // Eat enough distinct nutrients each day
-  | 'calories'      // Reach a combined daily calorie target
-  | 'consistency'   // Both log at least one meal every day
-  | 'protein';      // Combined protein servings per day
+  | 'calories'      // Combined daily calorie target (above or below a threshold)
+  | 'variety';      // Combined distinct nutrient-type count per day
 
 export interface MockPartner {
   id: string;
@@ -44,6 +43,12 @@ export interface MockGroup {
   goalType: GroupGoalType;
   /** Target value — meaning depends on goalType */
   goalValue: number;
+  /**
+   * For calories goal only: whether the goal is to stay below or reach above the target.
+   * 'above' = bulk / active lifestyle (eat at least N kcal)
+   * 'below' = cut / lighter eating (eat no more than N kcal combined)
+   */
+  caloriesDirection?: 'above' | 'below';
   createdAt: string;
 }
 
@@ -58,9 +63,8 @@ export const DUMMY_PARTNER: MockPartner = {
 
 export const GOAL_DEFAULTS: Record<GroupGoalType, number> = {
   nutrients: 8,      // 8 distinct nutrients per day combined
-  calories: 3000,    // 3000 kcal combined per day
-  consistency: 7,    // 7-day streak
-  protein: 6,        // 6 protein-rich foods combined per day
+  calories: 3000,    // 3000 kcal combined per day (above) or 2000 (below)
+  variety: 10,       // 10 distinct nutrient-type badges combined per day
 };
 
 function randomCode(): string {
@@ -102,12 +106,16 @@ export function isGroupFull(group: MockGroup): boolean {
   return group.partners.length >= MAX_PARTNERS;
 }
 
-export async function createGroupWithDummy(goalType: GroupGoalType): Promise<MockGroup> {
+export async function createGroupWithDummy(
+  goalType: GroupGoalType,
+  options?: { goalValue?: number; caloriesDirection?: 'above' | 'below' }
+): Promise<MockGroup> {
   const group: MockGroup = {
     inviteCode: generateInviteCode(),
     partners: [DUMMY_PARTNER],
     goalType,
-    goalValue: GOAL_DEFAULTS[goalType],
+    goalValue: options?.goalValue ?? GOAL_DEFAULTS[goalType],
+    caloriesDirection: goalType === 'calories' ? (options?.caloriesDirection ?? 'above') : undefined,
     createdAt: new Date().toISOString(),
   };
   await saveGroup(group);

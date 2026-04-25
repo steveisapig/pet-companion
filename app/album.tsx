@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,49 +6,32 @@ import {
   Pressable,
   FlatList,
   SectionList,
+  ScrollView,
   Dimensions,
-  ActivityIndicator,
-  Modal,
   RefreshControl,
-  Alert,
-  Animated,
 } from 'react-native';
-import type {
-  PanGestureHandlerGestureEvent,
-  PanGestureHandlerStateChangeEvent,
-} from 'react-native-gesture-handler';
-import {
-  GestureHandlerRootView,
-  PanGestureHandler,
-  FlatList as GalleryFlatList,
-  State,
-} from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, Download, LayoutGrid, List, X } from 'lucide-react-native';
-import { router } from 'expo-router';
+import { ChevronLeft, LayoutGrid, List } from 'lucide-react-native';
+import { router, useFocusEffect } from 'expo-router';
+import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
 import { getPetPhotos, type PetPhoto } from '@/lib/supabase-photos';
-import { getAlbumPhotos, savePhotoToDevice } from '@/lib/photo-album';
+import { getAlbumPhotos } from '@/lib/photo-album';
 import { getItemTypeDisplay } from '@/constants/badge-types';
 
 const hasSupabaseConfig = () =>
   !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLS = 3;
 const GAP = 8;
 const SIZE = (SCREEN_WIDTH - 40 - GAP * (COLS - 1)) / COLS;
 const blurhash = 'L6PZfSi_.AyE_3t7t7R**0o#DgR4';
-
-/** Release past this vertical distance dismisses the viewer */
-const GALLERY_DISMISS_DRAG_PX = 110;
-/** Fast vertical flick also dismisses (PanGestureHandler velocityY ≈ px/s) */
-const GALLERY_DISMISS_VELOCITY_Y = 700;
 
 type AlbumViewMode = 'list' | 'grid';
 
@@ -145,26 +128,12 @@ export default function AlbumScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation();
   const { userId } = usePet();
-  /** null = gallery closed; number = scroll index when opened */
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
-  /** Index of photo currently centered (updates when user swipes) */
-  const [activeGalleryIndex, setActiveGalleryIndex] = useState(0);
-  const [isSaving, setIsSaving] = useState(false);
   const [viewMode, setViewMode] = useState<AlbumViewMode>('list');
-  const galleryRef = useRef<GalleryFlatList<PetPhoto>>(null);
-  const galleryDragY = useRef(new Animated.Value(0)).current;
 
-  const galleryDragScale = useMemo(
-    () =>
-      galleryDragY.interpolate({
-        inputRange: [-300, 0, 300],
-        outputRange: [0.92, 1, 0.92],
-        extrapolate: 'clamp',
-      }),
-    [galleryDragY]
-  );
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { data: photos = [], isLoading, isFetching, refetch } = useQuery({
+  const { data: photos = [], isLoading, refetch } = useQuery({
     queryKey: ['albumPhotos', userId],
     queryFn: async (): Promise<PetPhoto[]> => {
       if (hasSupabaseConfig() && userId) {
@@ -188,87 +157,25 @@ export default function AlbumScreen() {
   const openGallery = useCallback(
     (photo: PetPhoto) => {
       const i = photos.findIndex((p) => photoKey(p) === photoKey(photo));
-      if (i < 0) return;
-      setGalleryIndex(i);
-      setActiveGalleryIndex(i);
+      if (i >= 0) setGalleryIndex(i);
     },
-    [photos]
+    [photos],
   );
-
-  const closeGallery = useCallback(() => {
-    galleryDragY.setValue(0);
-    setGalleryIndex(null);
-  }, [galleryDragY]);
-
-  useEffect(() => {
-    if (galleryIndex !== null) {
-      galleryDragY.setValue(0);
-    }
-  }, [galleryIndex, galleryDragY]);
-
-  /**
-   * Native horizontal FlatList wins the JS responder over parent PanResponder, so drag never fired.
-   * PanGestureHandler + simultaneousHandlers (gallery list ref) lets vertical pan and horizontal paging coexist.
-   */
-  const onGalleryGestureEvent = useCallback(
-    (e: PanGestureHandlerGestureEvent) => {
-      galleryDragY.setValue(e.nativeEvent.translationY);
-    },
-    [galleryDragY]
-  );
-
-  const onGalleryHandlerStateChange = useCallback(
-    (e: PanGestureHandlerStateChangeEvent) => {
-      if (e.nativeEvent.state !== State.END) return;
-      const { translationY, velocityY } = e.nativeEvent;
-      const dismiss =
-        Math.abs(translationY) > GALLERY_DISMISS_DRAG_PX ||
-        Math.abs(velocityY) > GALLERY_DISMISS_VELOCITY_Y;
-      if (dismiss) {
-        const target = translationY >= 0 ? SCREEN_HEIGHT : -SCREEN_HEIGHT;
-        Animated.timing(galleryDragY, {
-          toValue: target,
-          duration: 240,
-          useNativeDriver: true,
-        }).start(() => {
-          galleryDragY.setValue(0);
-          setGalleryIndex(null);
-        });
-      } else {
-        Animated.spring(galleryDragY, {
-          toValue: 0,
-          useNativeDriver: true,
-          friction: 7,
-          tension: 120,
-        }).start();
-      }
-    },
-    [galleryDragY]
-  );
-
-  const handleSaveToPhotos = useCallback(async () => {
-    if (galleryIndex === null || photos.length === 0) return;
-    const photo = photos[activeGalleryIndex];
-    if (!photo) return;
-    setIsSaving(true);
-    try {
-      const result = await savePhotoToDevice(photo.url);
-      if (result.success) {
-        Alert.alert(t('album.savedTitle'), t('album.savedBody'));
-      } else {
-        Alert.alert(t('album.saveFailedTitle'), result.error ?? t('album.saveFailedBody'));
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  }, [activeGalleryIndex, galleryIndex, photos, t]);
 
   const sections = useMemo(() => groupPhotosByDay(photos, t), [photos, t]);
 
+  useFocusEffect(useCallback(() => { refetch(); }, [refetch]));
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refetch();
+    setIsRefreshing(false);
+  }, [refetch]);
+
   const refreshControl = (
     <RefreshControl
-      refreshing={isFetching && !isLoading}
-      onRefresh={() => refetch()}
+      refreshing={isRefreshing}
+      onRefresh={handleRefresh}
       tintColor={Colors.softOrange}
     />
   );
@@ -349,12 +256,14 @@ export default function AlbumScreen() {
             </View>
           )
         ) : photos.length === 0 ? (
-          <View style={styles.emptyContainer}>
+          <ScrollView
+            style={styles.flex1}
+            contentContainerStyle={styles.emptyContainer}
+            refreshControl={refreshControl}
+          >
             <Text style={styles.emptyTitle}>{t('album.emptyTitle')}</Text>
-            <Text style={styles.emptySubtitle}>
-              {t('album.emptySubtitle')}
-            </Text>
-          </View>
+            <Text style={styles.emptySubtitle}>{t('album.emptySubtitle')}</Text>
+          </ScrollView>
         ) : viewMode === 'list' ? (
           <SectionList
             sections={sections}
@@ -393,110 +302,12 @@ export default function AlbumScreen() {
           />
         )}
 
-        <Modal
-          visible={galleryIndex !== null}
-          transparent
-          animationType="fade"
-          onRequestClose={closeGallery}
-        >
-          <GestureHandlerRootView style={styles.gestureRoot}>
-            <View style={styles.fullScreenBackdrop}>
-              {galleryIndex !== null && photos.length > 0 && (
-                <PanGestureHandler
-                  simultaneousHandlers={galleryRef}
-                  activeOffsetY={[-12, 12]}
-                  failOffsetX={[-36, 36]}
-                  onGestureEvent={onGalleryGestureEvent}
-                  onHandlerStateChange={onGalleryHandlerStateChange}
-                >
-                  <View style={styles.galleryModalInner}>
-                    <Animated.View
-                      style={[
-                        styles.galleryDraggableShell,
-                        {
-                          transform: [{ translateY: galleryDragY }, { scale: galleryDragScale }],
-                        },
-                      ]}
-                    >
-                      <GalleryFlatList
-                        ref={galleryRef}
-                        key={
-                          galleryIndex !== null && photos[galleryIndex]
-                            ? photoKey(photos[galleryIndex])
-                            : 'closed'
-                        }
-                        data={photos}
-                        horizontal
-                        pagingEnabled
-                        showsHorizontalScrollIndicator={false}
-                        keyExtractor={(item) => photoKey(item)}
-                        getItemLayout={(_, index) => ({
-                          length: SCREEN_WIDTH,
-                          offset: SCREEN_WIDTH * index,
-                          index,
-                        })}
-                        initialScrollIndex={Math.min(galleryIndex, photos.length - 1)}
-                        onMomentumScrollEnd={(e) => {
-                          const x = e.nativeEvent.contentOffset.x;
-                          const idx = Math.round(x / SCREEN_WIDTH);
-                          setActiveGalleryIndex(
-                            Math.max(0, Math.min(idx, photos.length - 1))
-                          );
-                        }}
-                        onScrollToIndexFailed={({ index }) => {
-                          setTimeout(() => {
-                            galleryRef.current?.scrollToOffset({
-                              offset: index * SCREEN_WIDTH,
-                              animated: false,
-                            });
-                          }, 100);
-                        }}
-                        renderItem={({ item }) => (
-                          <View style={styles.galleryPage}>
-                            <Image
-                              source={{ uri: item.url }}
-                              style={styles.galleryImage}
-                              contentFit="contain"
-                              placeholder={blurhash}
-                              transition={200}
-                            />
-                          </View>
-                        )}
-                        style={styles.galleryList}
-                      />
-                    </Animated.View>
-                    <Pressable
-                      style={[styles.modalCloseBtn, { top: insets.top + 12 }]}
-                      onPress={closeGallery}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('album.closeViewer')}
-                    >
-                      <X size={26} color="#fff" />
-                    </Pressable>
-                    <Pressable
-                      style={[styles.saveButton, { top: insets.top + 12 }]}
-                      onPress={handleSaveToPhotos}
-                      disabled={isSaving}
-                    >
-                      {isSaving ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <Download size={24} color="#fff" />
-                      )}
-                    </Pressable>
-                    <View style={[styles.pageIndicatorWrap, { bottom: insets.bottom + 20 }]}>
-                      <View style={styles.pageIndicator}>
-                        <Text style={styles.pageIndicatorText}>
-                          {activeGalleryIndex + 1} / {photos.length}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </PanGestureHandler>
-              )}
-            </View>
-          </GestureHandlerRootView>
-        </Modal>
+        <PhotoGalleryModal
+          photos={photos}
+          initialIndex={galleryIndex}
+          onClose={() => setGalleryIndex(null)}
+          showSave
+        />
       </View>
     </View>
   );
@@ -561,8 +372,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: 'rgba(232, 152, 94, 0.15)',
   },
+  flex1: { flex: 1 },
   emptyContainer: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
     gap: 8,
@@ -675,66 +487,5 @@ const styles = StyleSheet.create({
   photo: {
     width: '100%',
     height: '100%',
-  },
-  gestureRoot: {
-    flex: 1,
-  },
-  fullScreenBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.97)',
-  },
-  galleryModalInner: {
-    flex: 1,
-  },
-  galleryDraggableShell: {
-    flex: 1,
-  },
-  galleryList: {
-    flex: 1,
-  },
-  galleryPage: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-    backgroundColor: '#000',
-  },
-  galleryImage: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-  },
-  modalCloseBtn: {
-    position: 'absolute' as const,
-    zIndex: 20,
-    left: 16,
-    padding: 10,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  saveButton: {
-    position: 'absolute' as const,
-    zIndex: 20,
-    right: 24,
-    padding: 10,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  pageIndicatorWrap: {
-    position: 'absolute' as const,
-    zIndex: 20,
-    left: 0,
-    right: 0,
-    alignItems: 'center' as const,
-  },
-  pageIndicator: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  pageIndicatorText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600' as const,
   },
 });

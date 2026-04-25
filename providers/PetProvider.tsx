@@ -27,6 +27,7 @@ import {
   getPetPrimaryColor,
   savePetPrimaryColor,
 } from '@/lib/pet-color-storage';
+import { getMyUsername } from '@/lib/user-info';
 
 interface PetState extends Omit<PetServiceState, 'userId'> {
   userId: string | null;
@@ -80,6 +81,7 @@ const PET_LOADING_FALLBACK = {
   addPhoto: () => {},
   petPrimaryColor: null as string | null,
   setPetPrimaryColor: (_color: string | null) => {},
+  username: null as string | null,
 };
 
 const [PetProvider, _usePetRaw] = createContextHook(() => {
@@ -106,7 +108,6 @@ const [PetProvider, _usePetRaw] = createContextHook(() => {
   const [badges, setBadges] = useState<Badges>({});
   const [petPrimaryColor, setPetPrimaryColorState] = useState<string | null>(null);
 
-  // Load color from AsyncStorage once on mount
   useEffect(() => {
     getPetPrimaryColor().then(setPetPrimaryColorState);
   }, []);
@@ -115,6 +116,14 @@ const [PetProvider, _usePetRaw] = createContextHook(() => {
     setPetPrimaryColorState(color);
     savePetPrimaryColor(color);
   }, []);
+
+  const usernameQuery = useQuery({
+    queryKey: ['myUsername', userId],
+    queryFn: () => getMyUsername(userId!),
+    enabled: !!userId,
+    staleTime: Infinity,
+  });
+  const username = usernameQuery.data ?? null;
 
   const saveMutation = useMutation({
     mutationFn: savePetState,
@@ -275,6 +284,7 @@ const [PetProvider, _usePetRaw] = createContextHook(() => {
     addPhoto,
     petPrimaryColor,
     setPetPrimaryColor,
+    username,
   };
 });
 

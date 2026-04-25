@@ -32,6 +32,10 @@ const H_PADDING = 20;
 export default function ItemsScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation();
+
+  if (!__DEV__) {
+    return null;
+  }
   const { badges, petName } = usePet();
   const { width: screenWidth } = useWindowDimensions();
 

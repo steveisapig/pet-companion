@@ -9,6 +9,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,6 +22,14 @@ import { useOnboarding } from '@/providers/OnboardingProvider';
 import { getPetDescriptionKey, PET_CONFIGS, PetType } from '@/constants/pets';
 import PetPortrait from '@/components/PetPortrait';
 import { usePet } from '@/providers/PetProvider';
+import { useAuth } from '@/providers/AuthProvider';
+import {
+  isValidUsername,
+  normaliseUsername,
+  checkUsernameAvailable,
+  setMyUsername,
+} from '@/lib/user-info';
+import { setUsernamePromptDismissed } from '@/lib/onboarding-storage';
 
 const petTypes: PetType[] = ['mochi', 'nugget', 'cookie'];
 
@@ -29,9 +38,13 @@ export default function OnboardingScreen() {
   const { t } = useAppTranslation();
   const { selectPet } = usePet();
   const { startOnboarding } = useOnboarding();
+  const { user } = useAuth();
   const [selectedPet, setSelectedPet] = useState<PetType>('mochi');
   const [petName, setPetName] = useState<string>('');
-  const [step, setStep] = useState<'select' | 'name'>('select');
+  const [step, setStep] = useState<'select' | 'name' | 'username'>('select');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
   const scaleAnims = useRef(petTypes.map(() => new Animated.Value(1))).current;
@@ -80,13 +93,51 @@ export default function OnboardingScreen() {
     });
   }, [fadeAnim, slideAnim]);
 
-  const handleFinish = useCallback(async () => {
+  // Debounced username availability check
+  useEffect(() => {
+    if (!usernameInput) { setUsernameAvailable(null); return; }
+    const normalised = normaliseUsername(usernameInput);
+    if (!isValidUsername(normalised)) { setUsernameAvailable(null); return; }
+    setCheckingUsername(true);
+    const id = setTimeout(() => {
+      checkUsernameAvailable(normalised).then((ok) => {
+        setUsernameAvailable(ok);
+        setCheckingUsername(false);
+      });
+    }, 600);
+    return () => clearTimeout(id);
+  }, [usernameInput]);
+
+  // "Let's Go!" on the name step now advances to the username step
+  const handleNameNext = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: -40, duration: 200, useNativeDriver: true }),
+    ]).start(() => {
+      setStep('username');
+      slideAnim.setValue(40);
+      Animated.parallel([
+        Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.spring(slideAnim, { toValue: 0, friction: 8, tension: 60, useNativeDriver: true }),
+      ]).start();
+    });
+  }, [fadeAnim, slideAnim]);
+
+  const handleFinish = useCallback(async (skipUsername = false) => {
     const name = petName.trim() || PET_CONFIGS[selectedPet].name;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     await selectPet(selectedPet, name);
+    if (!skipUsername && user?.id && usernameInput.trim()) {
+      // Best-effort — don't block navigation on failure
+      await setMyUsername(user.id, usernameInput).catch(() => {});
+    }
+    if (skipUsername) {
+      await setUsernamePromptDismissed();
+    }
     await startOnboarding();
     router.replace('/pet');
-  }, [petName, selectedPet, selectPet, startOnboarding]);
+  }, [petName, selectedPet, usernameInput, user, selectPet, startOnboarding]);
 
   const config = PET_CONFIGS[selectedPet];
 
@@ -170,7 +221,7 @@ export default function OnboardingScreen() {
                   </Pressable>
                 </Animated.View>
               </>
-            ) : (
+            ) : step === 'name' ? (
               <>
                 <View style={styles.header}>
                   <View style={styles.nameStepImageWrap}>
@@ -201,13 +252,72 @@ export default function OnboardingScreen() {
                 <Animated.View style={{ transform: [{ translateY: continueBtnFloat }] }}>
                   <Pressable
                     style={[styles.continueBtn, { backgroundColor: config.accentColor }]}
-                    onPress={handleFinish}
+                    onPress={handleNameNext}
+                    testID="finish-button"
+                  >
+                    <Text style={styles.continueBtnText}>{t('onboarding.continue')}</Text>
+                    <ChevronRight size={20} color="#FFF" />
+                  </Pressable>
+                </Animated.View>
+              </>
+            ) : (
+              /* ── Username step ── */
+              <>
+                <View style={styles.header}>
+                  <Text style={styles.title}>{t('onboarding.chooseHandle')}</Text>
+                  <Text style={styles.nameSubtitle}>{t('onboarding.handleSubtitle')}</Text>
+                </View>
+
+                <View style={styles.nameInputWrap}>
+                  <View style={[styles.handleInputRow, { borderColor: config.accentColor }]}>
+                    <Text style={[styles.handlePrefix, { color: config.accentColor }]}>@</Text>
+                    <TextInput
+                      style={styles.handleInput}
+                      placeholder="yourhandle"
+                      placeholderTextColor={Colors.gray}
+                      value={usernameInput}
+                      onChangeText={(v) => setUsernameInput(normaliseUsername(v))}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      maxLength={20}
+                      autoFocus
+                    />
+                  </View>
+                  <View style={styles.handleStatus}>
+                    {checkingUsername && (
+                      <ActivityIndicator size="small" color={Colors.softOrange} />
+                    )}
+                    {!checkingUsername && usernameInput.length > 0 && !isValidUsername(usernameInput) && (
+                      <Text style={styles.handleHint}>{t('onboarding.handleFormatHint')}</Text>
+                    )}
+                    {!checkingUsername && usernameAvailable === true && (
+                      <Text style={styles.handleAvailable}>{t('onboarding.handleAvailable')}</Text>
+                    )}
+                    {!checkingUsername && usernameAvailable === false && (
+                      <Text style={styles.handleTaken}>{t('onboarding.handleTaken')}</Text>
+                    )}
+                  </View>
+                </View>
+
+                <Animated.View style={{ transform: [{ translateY: continueBtnFloat }] }}>
+                  <Pressable
+                    style={[
+                      styles.continueBtn,
+                      { backgroundColor: config.accentColor },
+                      (!usernameAvailable) && styles.continueBtnDisabled,
+                    ]}
+                    onPress={() => handleFinish(false)}
+                    disabled={!usernameAvailable}
                     testID="finish-button"
                   >
                     <Text style={styles.continueBtnText}>{t('onboarding.letsGo')}</Text>
                     <Sparkles size={20} color="#FFF" />
                   </Pressable>
                 </Animated.View>
+
+                <Pressable style={styles.skipBtn} onPress={() => handleFinish(true)}>
+                  <Text style={styles.skipBtnText}>{t('onboarding.skipForNow')}</Text>
+                </Pressable>
               </>
             )}
           </Animated.View>
@@ -365,5 +475,60 @@ const styles = StyleSheet.create({
     color: Colors.darkBrown,
     borderWidth: 2,
     textAlign: 'center' as const,
+  },
+  handleInputRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: Colors.cardBg,
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderWidth: 2,
+    gap: 6,
+  },
+  handlePrefix: {
+    fontSize: 22,
+    fontWeight: '700' as const,
+  },
+  handleInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: Colors.darkBrown,
+  },
+  handleStatus: {
+    minHeight: 22,
+    marginTop: 8,
+    alignItems: 'center' as const,
+  },
+  handleHint: {
+    fontSize: 13,
+    color: Colors.gray,
+    textAlign: 'center' as const,
+  },
+  handleAvailable: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#4CAF50',
+    textAlign: 'center' as const,
+  },
+  handleTaken: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#E53935',
+    textAlign: 'center' as const,
+  },
+  continueBtnDisabled: {
+    opacity: 0.45,
+  },
+  skipBtn: {
+    marginTop: 16,
+    alignItems: 'center' as const,
+    paddingVertical: 8,
+  },
+  skipBtnText: {
+    fontSize: 14,
+    color: Colors.gray,
+    textDecorationLine: 'underline' as const,
   },
 });
