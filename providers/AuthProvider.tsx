@@ -138,7 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signInWithDev = useCallback(async () => {
-    if (!__DEV__ && process.env.EXPO_PUBLIC_ENABLE_DEV_LOGIN !== 'true') return;
+    if (process.env.EXPO_PUBLIC_IS_DEV !== 'true') return;
     if (!TEST_USER_PASSWORD) {
       throw new Error('Set EXPO_PUBLIC_TEST_USER_PASSWORD in .env to use Dev login.');
     }

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect, router } from 'expo-router';
+import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -64,7 +65,7 @@ import {
   setUsernamePromptDismissed,
 } from '@/lib/onboarding-storage';
 
-const IS_DEV = process.env.EXPO_PUBLIC_IS_DEV === 'true';
+const IS_DEV = Constants.expoConfig?.extra?.IS_DEV === true;
 
 const hasSupabaseConfig = () =>
   !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);

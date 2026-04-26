@@ -12,6 +12,7 @@ import {
   NativeScrollEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +28,7 @@ import { checkSupabaseAuthHealth } from '@/lib/supabase-health';
 
 const hasSupabaseConfig = () =>
   !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+const IS_DEV = Constants.expoConfig?.extra?.IS_DEV === true;
 const TEST_USER_EMAIL = process.env.EXPO_PUBLIC_TEST_USER_EMAIL ?? 'test@test.com';
 
 /** ~1.5²× original heart (48) */
@@ -166,7 +168,7 @@ export default function SignInScreen() {
           colors={['#FFF8F0', '#FAF0E6', '#F5E6D3']}
           style={StyleSheet.absoluteFill}
         />
-        <View style={[styles.content, { paddingTop: insets.top + 40 }]}>
+        <View style={[styles.content, { paddingTop: insets.top + 90 }]}>
           <Text style={styles.title}>Marumimi</Text>
           <Text style={styles.subtitle}>
             {t('auth.signIn.noSupabase')}
@@ -192,7 +194,7 @@ export default function SignInScreen() {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollInner,
-          { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 },
+          { paddingTop: insets.top + 90, paddingBottom: insets.bottom + 24 },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -278,17 +280,19 @@ export default function SignInScreen() {
             </Pressable>
           )}
 
-          <Pressable
-            style={[styles.btn, styles.emailOptionBtn]}
-            onPress={() => router.push('/email-auth')}
-            disabled={!!loading}
-            testID="sign-in-email-button"
-          >
-            <Mail size={20} color={Colors.softOrange} />
-            <Text style={styles.emailOptionBtnText}>{t('auth.signIn.withEmail')}</Text>
-          </Pressable>
+          {IS_DEV && (
+            <Pressable
+              style={[styles.btn, styles.emailOptionBtn]}
+              onPress={() => router.push('/email-auth')}
+              disabled={!!loading}
+              testID="sign-in-email-button"
+            >
+              <Mail size={20} color={Colors.softOrange} />
+              <Text style={styles.emailOptionBtnText}>{t('auth.signIn.withEmail')}</Text>
+            </Pressable>
+          )}
 
-          {(__DEV__ || process.env.EXPO_PUBLIC_ENABLE_DEV_LOGIN === 'true') && (
+          {IS_DEV && (
             <Pressable
               style={[styles.btn, styles.devBtn]}
               onPress={() => handleSignIn(signInWithDev, 'dev')}
@@ -303,16 +307,18 @@ export default function SignInScreen() {
           )}
         </View>
 
-        <Pressable
-          onPress={() => router.push('/email-sign-up')}
-          style={styles.signUpLinkWrap}
-          hitSlop={12}
-        >
-          <Text style={styles.signUpLinkText}>
-            {t('auth.signIn.needAccountPrefix')}
-            <Text style={styles.signUpLinkEmphasis}>{t('auth.signIn.signUp')}</Text>
-          </Text>
-        </Pressable>
+        {IS_DEV && (
+          <Pressable
+            onPress={() => router.push('/email-sign-up')}
+            style={styles.signUpLinkWrap}
+            hitSlop={12}
+          >
+            <Text style={styles.signUpLinkText}>
+              {t('auth.signIn.needAccountPrefix')}
+              <Text style={styles.signUpLinkEmphasis}>{t('auth.signIn.signUp')}</Text>
+            </Text>
+          </Pressable>
+        )}
 
         <Text style={styles.hint}>
           {t('auth.signIn.hint')}

@@ -22,7 +22,7 @@ import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
 import PetPortrait from '@/components/PetPortrait';
-import { normaliseUsername } from '@/lib/user-info';
+import { normaliseUsername, isValidUsername, checkUsernameAvailable, setMyUsername } from '@/lib/user-info';
 import {
   getMyPartnership,
   getMyPendingInvites,
@@ -45,7 +45,7 @@ import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Screen = 'loading' | 'none' | 'found' | 'goal-select' | 'pending-outgoing' | 'active';
+type Screen = 'loading' | 'no-username' | 'none' | 'found' | 'goal-select' | 'pending-outgoing' | 'active';
 
 interface FoundUser {
   userId: string;
@@ -222,6 +222,12 @@ export default function GroupScreen() {
   const [decliningId, setDecliningId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
+  // Username setup (shown when user has no handle yet)
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [savingUsername, setSavingUsername] = useState(false);
+
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   // ── Queries (cached to AsyncStorage via PersistQueryClientProvider) ────────
@@ -286,14 +292,43 @@ export default function GroupScreen() {
     if (partnershipLoading) return 'loading';
     if (activePartnership) return 'active';
     if (outgoingInvite) return 'pending-outgoing';
+    if (!username) return 'no-username';
     return 'none';
-  }, [localScreen, partnershipLoading, activePartnership, outgoingInvite]);
+  }, [localScreen, partnershipLoading, activePartnership, outgoingInvite, username]);
 
   // Helper: invalidate all partnership-related queries.
   const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['myPartnership', userId] });
     queryClient.invalidateQueries({ queryKey: ['myPendingInvites', userId] });
   }, [queryClient, userId]);
+
+  // Debounced username availability check (600 ms)
+  useEffect(() => {
+    if (!usernameInput) { setUsernameAvailable(null); return; }
+    const normalised = normaliseUsername(usernameInput);
+    if (!isValidUsername(normalised)) { setUsernameAvailable(null); return; }
+    setCheckingUsername(true);
+    const id = setTimeout(() => {
+      checkUsernameAvailable(normalised).then((ok) => {
+        setUsernameAvailable(ok);
+        setCheckingUsername(false);
+      });
+    }, 600);
+    return () => clearTimeout(id);
+  }, [usernameInput]);
+
+  const handleSaveUsername = useCallback(async () => {
+    if (!userId || !usernameInput) return;
+    setSavingUsername(true);
+    const err = await setMyUsername(userId, usernameInput);
+    setSavingUsername(false);
+    if (err) {
+      Alert.alert(t('group.noUsername.saveError'), err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    queryClient.invalidateQueries({ queryKey: ['myUsername', userId] });
+  }, [userId, usernameInput, queryClient, t]);
 
   // Re-fetch on screen focus so both users see changes made by the other side.
   useFocusEffect(useCallback(() => {
@@ -508,6 +543,80 @@ export default function GroupScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+
+          {/* ── No username — prompt to set handle ──────────────────── */}
+          {screen === 'no-username' && (
+            <>
+              <View style={styles.heroWrap}>
+                <Text style={styles.heroEmoji}>🏷️</Text>
+                <Text style={styles.heroTitle}>{t('group.noUsername.heroTitle')}</Text>
+                <Text style={styles.heroSubtitle}>{t('group.noUsername.heroSubtitle')}</Text>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>{t('group.noUsername.sectionTitle')}</Text>
+                <View style={styles.handleInputRow}>
+                  <Text style={styles.handlePrefix}>@</Text>
+                  <TextInput
+                    style={styles.handleInput}
+                    placeholder={t('group.noUsername.placeholder')}
+                    placeholderTextColor={Colors.gray}
+                    value={usernameInput}
+                    onChangeText={(v) => {
+                      setUsernameInput(normaliseUsername(v));
+                      setUsernameAvailable(null);
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    maxLength={20}
+                    returnKeyType="done"
+                    onSubmitEditing={() => {
+                      if (usernameAvailable) handleSaveUsername();
+                    }}
+                  />
+                </View>
+
+                {/* Availability feedback */}
+                {usernameInput.length > 0 && (() => {
+                  const normalised = normaliseUsername(usernameInput);
+                  const validFormat = isValidUsername(normalised);
+                  if (!validFormat) {
+                    return (
+                      <Text style={styles.usernameHint}>{t('group.noUsername.formatHint')}</Text>
+                    );
+                  }
+                  if (checkingUsername) {
+                    return (
+                      <View style={styles.usernameStatusRow}>
+                        <ActivityIndicator size="small" color={Colors.gray} />
+                        <Text style={styles.usernameChecking}>{t('group.noUsername.checking')}</Text>
+                      </View>
+                    );
+                  }
+                  if (usernameAvailable === true) {
+                    return <Text style={styles.usernameAvailable}>{t('group.noUsername.available')}</Text>;
+                  }
+                  if (usernameAvailable === false) {
+                    return <Text style={styles.usernameTaken}>{t('group.noUsername.taken')}</Text>;
+                  }
+                  return null;
+                })()}
+
+                <Pressable
+                  style={[
+                    styles.primaryBtn,
+                    (!usernameAvailable || savingUsername) && styles.btnDisabled,
+                  ]}
+                  onPress={handleSaveUsername}
+                  disabled={!usernameAvailable || savingUsername}
+                >
+                  {savingUsername
+                    ? <ActivityIndicator size="small" color="#FFF" />
+                    : <Text style={styles.primaryBtnText}>{t('group.noUsername.saveBtn')}</Text>}
+                </Pressable>
+              </View>
+            </>
+          )}
 
           {/* ── No group ────────────────────────────────────────────── */}
           {screen === 'none' && (
@@ -1238,4 +1347,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: Colors.lightGray,
   },
   mealsDayTitle: { fontSize: 13, fontWeight: '700', color: Colors.brown },
+
+  // Username setup
+  usernameStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  usernameChecking: { fontSize: 13, color: Colors.gray },
+  usernameAvailable: { fontSize: 13, fontWeight: '600', color: '#4CAF50', marginTop: 6 },
+  usernameTaken: { fontSize: 13, fontWeight: '600', color: '#E53935', marginTop: 6 },
+  usernameHint: { fontSize: 12, color: Colors.gray, marginTop: 6, lineHeight: 18 },
 });

@@ -62,7 +62,7 @@ function RootLayoutNav() {
       <Stack.Screen name="email-auth" />
       <Stack.Screen name="email-sign-up" />
       <Stack.Screen name="onboarding" />
-      <Stack.Screen name="pet" />
+      <Stack.Screen name="pet" options={{ gestureEnabled: false }} />
       <Stack.Screen name="walk" />
       <Stack.Screen name="inventory" />
       <Stack.Screen name="items" />

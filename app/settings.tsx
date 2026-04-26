@@ -8,6 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Check, ChevronDown, Mail } from 'lucide-react-native';
@@ -19,7 +20,7 @@ import { usePet } from '@/providers/PetProvider';
 import PetPortrait from '@/components/PetPortrait';
 import { PET_CONFIGS } from '@/constants/pets';
 
-const IS_DEV = process.env.EXPO_PUBLIC_IS_DEV === 'true';
+const IS_DEV = Constants.expoConfig?.extra?.IS_DEV === true;
 
 /**
  * Preset color palette for pet customization.
@@ -189,16 +190,20 @@ export default function SettingsScreen() {
 
           {/* ── Contact ───────────────────────────────────────────── */}
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Contact</Text>
+            <Text style={styles.sectionTitle}>
+              {t('settings.contactSection', { defaultValue: 'Contact' })}
+            </Text>
             <Text style={styles.sectionHint}>
-              Have feedback or need help? Send us a message.
+              {t('settings.contactHint', { defaultValue: 'Have feedback or need help? Send us a message.' })}
             </Text>
             <Pressable
               style={styles.contactBtn}
               onPress={() => Linking.openURL('mailto:stephen.chalders@gmail.com')}
             >
               <Mail size={18} color={Colors.softOrange} />
-              <Text style={styles.contactBtnText}>Send a message</Text>
+              <Text style={styles.contactBtnText}>
+                {t('settings.contactSendMessage', { defaultValue: 'Send a message' })}
+              </Text>
             </Pressable>
           </View>
         </ScrollView>
