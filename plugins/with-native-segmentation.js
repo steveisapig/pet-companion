@@ -5,6 +5,12 @@ const path = require('path');
 const FILES = [
   'NativeSegmentationModule.swift',
   'NativeSegmentationModule.m',
+  'NativeCameraModule.swift',
+  'NativeCameraModule.m',
+  'CameraViewController.swift',
+  'NativeCropModule.swift',
+  'NativeCropModule.m',
+  'CropImageView.swift',
 ];
 
 // Write source files to ios/Marumimi/ during expo prebuild so EAS Build can find them.
