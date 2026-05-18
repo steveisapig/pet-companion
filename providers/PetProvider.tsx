@@ -82,6 +82,7 @@ const PET_LOADING_FALLBACK = {
   petPrimaryColor: null as string | null,
   setPetPrimaryColor: (_color: string | null) => {},
   username: null as string | null,
+  devResetToFirstLaunch: () => {},
 };
 
 const [PetProvider, _usePetRaw] = createContextHook(() => {
@@ -262,6 +263,11 @@ const [PetProvider, _usePetRaw] = createContextHook(() => {
     }))
     .sort((a, b) => b.count - a.count)[0] ?? null;
 
+  const devResetToFirstLaunch = useCallback(() => {
+    // Memory-only: no db write, so the real pet data is untouched on next launch
+    setPetState(prev => ({ ...prev, onboardingComplete: false }));
+  }, []);
+
   return {
     petType: petState.petType,
     petName: petState.petName,
@@ -285,6 +291,7 @@ const [PetProvider, _usePetRaw] = createContextHook(() => {
     petPrimaryColor,
     setPetPrimaryColor,
     username,
+    devResetToFirstLaunch,
   };
 });
 

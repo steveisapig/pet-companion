@@ -10,14 +10,17 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
+  PanResponder,
+  ScrollView,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect, router } from 'expo-router';
 import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import Svg, { Polygon } from 'react-native-svg';
+import Svg, { Path, Polygon } from 'react-native-svg';
 import {
   Camera,
   Flame,
@@ -28,6 +31,7 @@ import {
   RotateCcw,
   Settings,
   Star,
+  Target,
   Users,
 } from 'lucide-react-native';
 import { getNutrientDisplay } from '@/constants/badge-types';
@@ -63,14 +67,25 @@ import {
 import {
   getUsernamePromptDismissed,
   setUsernamePromptDismissed,
+  getDailyCalorieGoalKcal,
+  getDailyCalorieDirection,
 } from '@/lib/onboarding-storage';
+import { fetchAllUserStreakDates, computeStreakLengthFromDates } from '@/lib/user-streak';
+import { getMyPartnership, getPartnershipStreak } from '@/lib/partnerships';
 
 const IS_DEV = Constants.expoConfig?.extra?.IS_DEV === true;
+
+const DEV_SCENARIOS: { label: string; demo: string }[] = [
+  { label: '❤️  Success: Loved (10/10)',      demo: 'loved' },
+  { label: '😊  Success: Liked a lot (8/10)',  demo: 'liked_alot' },
+  { label: '🙂  Success: Liked (5/10)',         demo: 'liked' },
+  { label: '😐  Success: Disliked (2/10)',      demo: 'disliked' },
+];
 
 const hasSupabaseConfig = () =>
   !!(process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 /**
  * Onboarding pointer targets (see pet screen layout):
@@ -79,6 +94,27 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
  * - Menu: `topBarLeft` → `menuBtn` (36×36), first control.
  */
 const TOP_BAR_HIT = 36;
+const SPOTLIGHT_PAD = 12;
+/** borderRadius per onboarding step: [camera, album, menu, group] */
+const STEP_BUTTON_RADIUS = [18, 18, 18, 18];
+/** Group button center X for the step-3 onboarding arrow */
+const ONBOARD_GROUP_BTN_CENTER_X = 20 + 54 / 2;
+
+function roundedRectPath(x: number, y: number, w: number, h: number, r: number): string {
+  const cr = Math.min(r, w / 2, h / 2);
+  return [
+    `M ${x + cr} ${y}`,
+    `H ${x + w - cr}`,
+    `A ${cr} ${cr} 0 0 1 ${x + w} ${y + cr}`,
+    `V ${y + h - cr}`,
+    `A ${cr} ${cr} 0 0 1 ${x + w - cr} ${y + h}`,
+    `H ${x + cr}`,
+    `A ${cr} ${cr} 0 0 1 ${x} ${y + h - cr}`,
+    `V ${y + cr}`,
+    `A ${cr} ${cr} 0 0 1 ${x + cr} ${y}`,
+    'Z',
+  ].join(' ');
+}
 /** Step 0 hint card — smaller bottom = card lower on screen */
 const ONBOARD_STEP0_CARD_BOTTOM = 100;
 /** Pixels between card bottom edge and triangle base (Share a moment step) */
@@ -88,22 +124,6 @@ const ONBOARD_TRIANGLE_H = 11;
 const ONBOARD_TRIANGLE_HALF_W = 9;
 /** Steps 1–2: white card top (overlay y; below safeContent paddingTop) */
 const ONBOARD_STEP12_CARD_TOP = 144;
-/** Album icon center X: from content left; ~36px btn + gap + Lv badge right of it */
-const ONBOARD_ALBUM_CENTER_X_OFFSET = 56;
-/** Album / menu hit target half-size (36×36) */
-const ONBOARD_CORNER_BTN_RADIUS = 18;
-/** Card ↔ triangle and triangle ↔ target gaps (corner steps) */
-const ONBOARD_GAP_COUPLE = 2;
-/** Fixed diagonal offset from the corner target for steps 2–3; yields an exact 45° arrow. */
-const ONBOARD_CORNER_TRIANGLE_OFFSET = 50;
-/** Rotating the down-pointing triangle by ±135° makes the visual arrow exactly 45° diagonally. */
-const ONBOARD_CORNER_TRIANGLE_ROT_DEG = 135;
-/** Step 2 (album) onboarding arrow position tweak. */
-const ONBOARD_STEP1_ARROW_OFFSET_X = 50;
-const ONBOARD_STEP1_ARROW_OFFSET_Y = 20;
-/** Step 3 (menu) onboarding arrow position tweak. */
-const ONBOARD_STEP2_ARROW_OFFSET_X = -24;
-const ONBOARD_STEP2_ARROW_OFFSET_Y = 24;
 
 /** Small down-pointing SVG triangle (rotate for album / menu aim) */
 function OnboardingTriangleDown({ color }: { color: string }) {
@@ -117,28 +137,6 @@ function OnboardingTriangleDown({ color }: { color: string }) {
 }
 
 /** Album / menu tips: place the triangle tip on a fixed 45° diagonal from the target button. */
-function computeCornerOnboardingGuide(
-  btnCx: number,
-  btnCy: number,
-  cardCx: number,
-  cardTopY: number,
-  btnRadius: number,
-  gapBtn: number,
-  gapY: number
-) {
-  const horizontalDir = Math.sign(cardCx - btnCx) || 1;
-  const baseOffset = btnRadius + gapBtn + ONBOARD_CORNER_TRIANGLE_OFFSET;
-  let tipY = btnCy + baseOffset;
-
-  /** Bottom of top-bar row; triangle view uses top = tipY - ONBOARD_TRIANGLE_H, so tipY must be ≥ this */
-  const yMinTip = TOP_BAR_HIT + ONBOARD_TRIANGLE_H + gapY;
-  const yMaxTip = cardTopY - gapY;
-  tipY = Math.max(yMinTip, Math.min(yMaxTip, tipY));
-  const tipX = btnCx + horizontalDir * (tipY - btnCy);
-
-  const rot = horizontalDir > 0 ? ONBOARD_CORNER_TRIANGLE_ROT_DEG : -ONBOARD_CORNER_TRIANGLE_ROT_DEG;
-  return { tipX, tipY, rot };
-}
 
 const REACTIONS = ['💕', '⭐', '🎵', '✨', '💖', '🌟'];
 
@@ -190,10 +188,11 @@ export default function PetScreen() {
   const nutritionAnalysisWindow = useMemo(() => getNutritionAnalysisWindow(), []);
   const {
     petType, petName, happiness, mood, userId,
-    level, expProgress, justLeveledUp, clearLevelUp,
+    level, justLeveledUp, clearLevelUp,
     petPrimaryColor,
     setPetPrimaryColor,
     username,
+    devResetToFirstLaunch,
   } = usePet();
 
   const {
@@ -227,13 +226,23 @@ export default function PetScreen() {
     staleTime: 30_000,
   });
 
+  const { data: allStreakDates = [], refetch: refetchStreakDates } = useQuery({
+    queryKey: ['userStreakAll', userId],
+    queryFn: () => fetchAllUserStreakDates(userId!),
+    enabled: !!userId && hasSupabaseConfig(),
+    staleTime: 60_000,
+  });
+
   useFocusEffect(
     useCallback(() => {
+      getDailyCalorieGoalKcal().then(setCalorieGoal);
+      getDailyCalorieDirection().then(setCalorieDirection);
       if (userId && hasSupabaseConfig()) {
         refetchTodayPhotos();
         refetchRecentNutritionPhotos();
+        refetchStreakDates();
       }
-    }, [userId, refetchTodayPhotos, refetchRecentNutritionPhotos])
+    }, [userId, refetchTodayPhotos, refetchRecentNutritionPhotos, refetchStreakDates])
   );
 
   const dailyNutrition = useMemo(
@@ -244,7 +253,7 @@ export default function PetScreen() {
   const canRunNutritionAnalysis =
     recentPhotoCount >= NUTRITION_ANALYSIS_REQUIRED_PHOTOS;
   const { signOut, session } = useAuth();
-  const { step: onboardingStep, advanceStep, startOnboarding } = useOnboarding();
+  const { step: onboardingStep, advanceStep, startOnboarding, devRestartOnboarding } = useOnboarding();
 
   // ── Username prompt ──────────────────────────────────────────────────────────
   // Start as true (hidden) until AsyncStorage confirms it hasn't been dismissed.
@@ -273,6 +282,25 @@ export default function PetScreen() {
     myUsernameLoaded &&
     myUsername === null;
   const queryClient = useQueryClient();
+
+  const personalStreak = useMemo(
+    () => computeStreakLengthFromDates(allStreakDates),
+    [allStreakDates],
+  );
+
+  const { data: petPagePartnership } = useQuery({
+    queryKey: ['myPartnership', userId],
+    queryFn: () => getMyPartnership(userId!),
+    enabled: !!userId && hasSupabaseConfig(),
+    staleTime: 60_000,
+  });
+
+  const { data: partnershipStreak = 0 } = useQuery({
+    queryKey: ['partnershipStreak', petPagePartnership?.id],
+    queryFn: () => getPartnershipStreak(petPagePartnership!.id),
+    enabled: !!petPagePartnership?.id,
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     if (!showUsernamePrompt) return;
@@ -303,18 +331,31 @@ export default function PetScreen() {
 
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cameraButtonRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const albumButtonRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const menuButtonRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const groupButtonRef = useRef<any>(null);
+  const [spotlightRect, setSpotlightRect] = useState<{ x: number; y: number; w: number; h: number; r: number } | null>(null);
+
   const bounceAnim = useRef(new Animated.Value(0)).current;
   const petScale = useRef(new Animated.Value(1)).current;
   const idleAnim = useRef(new Animated.Value(0)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
-  const expProgressAnim = useRef(new Animated.Value(0)).current;
+  const calorieProgressAnim = useRef(new Animated.Value(0)).current;
   const levelUpScale = useRef(new Animated.Value(0)).current;
   const levelUpOpacity = useRef(new Animated.Value(0)).current;
   const onboardingArrowPulse = useRef(new Animated.Value(0)).current;
   const nutritionFlashAnim = useRef(new Animated.Value(0)).current;
   const menuSlideAnim = useRef(new Animated.Value(-180)).current;
   const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; x: number; anim: Animated.Value }[]>([]);
+  const [calorieGoal, setCalorieGoal] = useState(DAILY_CALORIE_GOAL_KCAL);
+  const [calorieDirection, setCalorieDirection] = useState<'above' | 'below'>('below');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [devMenuVisible, setDevMenuVisible] = useState(false);
   const [nutritionAnalysisVisible, setNutritionAnalysisVisible] = useState(false);
   const [nutritionAnalysisLoading, setNutritionAnalysisLoading] = useState(false);
   const [nutritionAnalysisError, setNutritionAnalysisError] = useState<string | null>(null);
@@ -348,12 +389,13 @@ export default function PetScreen() {
   }, [happiness, progressAnim]);
 
   useEffect(() => {
-    Animated.timing(expProgressAnim, {
-      toValue: expProgress,
+    const ratio = calorieGoal > 0 ? Math.min(dailyNutrition.totalCalories / calorieGoal, 1) : 0;
+    Animated.timing(calorieProgressAnim, {
+      toValue: ratio,
       duration: 500,
       useNativeDriver: false,
     }).start();
-  }, [expProgress, expProgressAnim]);
+  }, [dailyNutrition.totalCalories, calorieGoal, calorieProgressAnim]);
 
   useEffect(() => {
     if (justLeveledUp) {
@@ -378,7 +420,7 @@ export default function PetScreen() {
   }, [idleAnim]);
 
   useEffect(() => {
-    if (onboardingStep < 0 || onboardingStep > 2) return;
+    if (onboardingStep < 0 || onboardingStep > 3) return;
     onboardingArrowPulse.setValue(0);
     const loop = Animated.loop(
       Animated.sequence([
@@ -397,6 +439,25 @@ export default function PetScreen() {
     loop.start();
     return () => loop.stop();
   }, [onboardingStep, onboardingArrowPulse]);
+
+  const measureSpotlight = useCallback((step: number) => {
+    if (step < 0 || step > 3) { setSpotlightRect(null); return () => {}; }
+    const refs = [cameraButtonRef, albumButtonRef, menuButtonRef, groupButtonRef];
+    const id = setTimeout(() => {
+      refs[step].current?.measureInWindow((x: number, y: number, w: number, h: number) => {
+        if (w > 0 && h > 0) setSpotlightRect({ x, y, w, h, r: STEP_BUTTON_RADIUS[step] + SPOTLIGHT_PAD });
+      });
+    }, 100);
+    return () => clearTimeout(id);
+  }, [cameraButtonRef, albumButtonRef, menuButtonRef, groupButtonRef]);
+
+  useEffect(() => {
+    return measureSpotlight(onboardingStep);
+  }, [onboardingStep, measureSpotlight]);
+
+  useFocusEffect(useCallback(() => {
+    return measureSpotlight(onboardingStep);
+  }, [onboardingStep, measureSpotlight]));
 
   useEffect(() => {
     let active = true;
@@ -526,7 +587,8 @@ export default function PetScreen() {
     menuSlideAnim.setValue(-180);
     setMenuOpen(true);
     Animated.timing(menuSlideAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
-  }, [menuSlideAnim]);
+    if (onboardingStep === 2) advanceStep();
+  }, [menuSlideAnim, onboardingStep, advanceStep]);
 
   const closeMenu = useCallback((onDone?: () => void) => {
     Animated.timing(menuSlideAnim, { toValue: -180, duration: 200, useNativeDriver: true })
@@ -536,12 +598,23 @@ export default function PetScreen() {
       });
   }, [menuSlideAnim]);
 
+  const openMenuRef = useRef(openMenu);
+  useEffect(() => { openMenuRef.current = openMenu; }, [openMenu]);
+  const edgePanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) =>
+        gs.dx > 8 && Math.abs(gs.dy) < 40 && gs.moveX < 40,
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dx > 30) openMenuRef.current();
+      },
+    }),
+  ).current;
+
   const handleInventory = useCallback(async () => {
     closeMenu();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (onboardingStep === 2) await advanceStep();
     router.push('/inventory');
-  }, [onboardingStep, advanceStep]);
+  }, [closeMenu]);
 
   const handleItems = useCallback(() => {
     closeMenu(() => router.push('/items'));
@@ -568,7 +641,13 @@ export default function PetScreen() {
   }, [closeMenu, signOut]);
 
   const handleGroup = useCallback(() => {
-    closeMenu(() => router.push('/group'));
+    if (onboardingStep === 3) advanceStep();
+    closeMenu(() => router.navigate('/group'));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, [closeMenu, onboardingStep, advanceStep]);
+
+  const handleGoals = useCallback(() => {
+    closeMenu(() => router.push('/goals'));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [closeMenu]);
 
@@ -664,73 +743,54 @@ export default function PetScreen() {
     outputRange: ['0%', '100%'],
   });
 
-  const expProgressWidth = expProgressAnim.interpolate({
+  const calorieProgressWidth = calorieProgressAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '100%'],
   });
+  const calorieBarColor = (() => {
+    const ratio = calorieGoal > 0 ? dailyNutrition.totalCalories / calorieGoal : 0;
+    if (calorieDirection === 'above') {
+      if (ratio >= 1)    return '#43A047';
+      if (ratio >= 0.75) return '#FFA000';
+      return '#E53935';
+    } else {
+      if (dailyNutrition.totalCalories > calorieGoal) return '#E53935';
+      if (ratio >= 0.75) return '#43A047';
+      return '#FFA000';
+    }
+  })();
 
-  /** Overlay content width (matches safeContent horizontal padding 20 + 20) */
-  const onboardOverlayW = SCREEN_WIDTH - 40;
-  /** Button centers in onboarding overlay coords (y=0 = top of topBar row) */
-  const onboardAlbumCx = onboardOverlayW - ONBOARD_ALBUM_CENTER_X_OFFSET;
-  const onboardAlbumCy = TOP_BAR_HIT / 2;
-  const onboardMenuCx = TOP_BAR_HIT / 2;
-  const onboardMenuCy = TOP_BAR_HIT / 2;
-  const onboardCardMidX = onboardOverlayW / 2;
+  const happinessBarColor = (() => {
+    if (happiness >= 70) return '#43A047';
+    if (happiness >= 40) return '#FFA000';
+    return '#E53935';
+  })();
+
   /** Share a moment: tip bottom offset so card bottom → 2px → triangle base → 11px → tip (see ONBOARD_TRIANGLE_H) */
   const step0TriangleTipBottom =
     insets.bottom +
     ONBOARD_STEP0_CARD_BOTTOM -
     ONBOARD_STEP0_GAP_CARD_TO_TRIANGLE -
     ONBOARD_TRIANGLE_H;
-  const onboardAlbumGuide = computeCornerOnboardingGuide(
-    onboardAlbumCx,
-    onboardAlbumCy,
-    onboardCardMidX,
-    ONBOARD_STEP12_CARD_TOP,
-    ONBOARD_CORNER_BTN_RADIUS,
-    ONBOARD_GAP_COUPLE,
-    ONBOARD_GAP_COUPLE
-  );
-  const onboardAlbumGuideAdjusted = {
-    ...onboardAlbumGuide,
-    tipX: onboardAlbumGuide.tipX + ONBOARD_STEP1_ARROW_OFFSET_X,
-    tipY: onboardAlbumGuide.tipY + ONBOARD_STEP1_ARROW_OFFSET_Y,
-  };
-  const onboardMenuGuide = computeCornerOnboardingGuide(
-    onboardMenuCx,
-    onboardMenuCy,
-    onboardCardMidX,
-    ONBOARD_STEP12_CARD_TOP,
-    ONBOARD_CORNER_BTN_RADIUS,
-    ONBOARD_GAP_COUPLE,
-    ONBOARD_GAP_COUPLE
-  );
-  const onboardMenuGuideAdjusted = {
-    ...onboardMenuGuide,
-    tipX: onboardMenuGuide.tipX + ONBOARD_STEP2_ARROW_OFFSET_X,
-    tipY: onboardMenuGuide.tipY + ONBOARD_STEP2_ARROW_OFFSET_Y,
-  };
-  const onboardAlbumTriangleRot = onboardAlbumGuideAdjusted.rot;
-  const onboardMenuTriangleRot = onboardMenuGuideAdjusted.rot;
-  const onboardPulse = 3.5;
-  const albumHypot =
-    Math.hypot(
-      onboardAlbumCx - onboardAlbumGuideAdjusted.tipX,
-      onboardAlbumCy - onboardAlbumGuideAdjusted.tipY
-    ) || 1;
-  const menuHypot =
-    Math.hypot(
-      onboardMenuCx - onboardMenuGuideAdjusted.tipX,
-      onboardMenuCy - onboardMenuGuideAdjusted.tipY
-    ) || 1;
-  const albumPulseDx = ((onboardAlbumCx - onboardAlbumGuideAdjusted.tipX) / albumHypot) * onboardPulse;
-  const albumPulseDy = ((onboardAlbumCy - onboardAlbumGuideAdjusted.tipY) / albumHypot) * onboardPulse;
-  const menuPulseDx = ((onboardMenuCx - onboardMenuGuideAdjusted.tipX) / menuHypot) * onboardPulse;
-  const menuPulseDy = ((onboardMenuCy - onboardMenuGuideAdjusted.tipY) / menuHypot) * onboardPulse;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...edgePanResponder.panHandlers}>
+      {(personalStreak > 0 || partnershipStreak > 0) && (
+        <View style={styles.streakSidebar} pointerEvents="box-none">
+          {personalStreak > 0 && (
+            <Pressable style={styles.streakPill} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/streak'); }}>
+              <Text style={styles.streakPillEmoji}>🔥</Text>
+              <Text style={styles.streakPillCount}>{personalStreak}</Text>
+            </Pressable>
+          )}
+          {partnershipStreak > 0 && (
+            <Pressable style={styles.streakPill} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.navigate('/group'); }}>
+              <Text style={styles.streakPillEmoji}>🤝</Text>
+              <Text style={styles.streakPillCount}>{partnershipStreak}</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
       <LinearGradient
         colors={
           mood === 'miserable' ? ['#E8E0D8', '#D5CCC4', '#C8BFB7'] :
@@ -744,11 +804,12 @@ export default function PetScreen() {
         <View style={styles.topBar}>
           <View style={styles.topBarLeft}>
             <Pressable
+              ref={menuButtonRef}
               style={styles.menuBtn}
               onPress={openMenu}
               testID="menu-button"
             >
-              <Menu size={22} color={Colors.darkBrown} />
+              <Menu size={18} color="#FFF" />
             </Pressable>
             <View style={styles.nameTag}>
               <Text style={styles.petNameText}>{petName}</Text>
@@ -791,42 +852,30 @@ export default function PetScreen() {
                 </Pressable>
               </Animated.View>
             )}
-            <Pressable style={styles.albumBtn} onPress={handleAlbum} testID="album-button">
-              <Images size={18} color="#FFF" />
+            <Pressable ref={albumButtonRef} style={styles.albumBtn} onPress={handleAlbum} testID="album-button">
+              <Images size={22} color="#FFF" />
             </Pressable>
-            <View style={[styles.statBadge, styles.levelBadge]}>
-              <Text style={styles.levelText}>{t('pet.levelShort', { level: String(level) })}</Text>
-            </View>
           </View>
         </View>
 
-        <View style={styles.barSection}>
-          <Text style={styles.barLabel}>{t('pet.experienceToNextLevel')}</Text>
-          <View style={styles.xpBarContainer}>
-            <View style={styles.xpBarBg}>
-              <Animated.View
-                style={[styles.xpBarFill, { width: expProgressWidth }]}
-              />
-            </View>
-            <Text style={styles.xpLabel}>XP</Text>
-          </View>
-        </View>
+        {IS_DEV && (
+          <Pressable
+            style={[styles.devBtn, { position: 'absolute', top: insets.top + 14, alignSelf: 'center' }]}
+            onPress={() => setDevMenuVisible(true)}
+          >
+            <Text style={styles.devBtnText}>DEV</Text>
+          </Pressable>
+        )}
 
         <View style={styles.barSection}>
-          <Text style={styles.barLabel}>{t('pet.happiness')}</Text>
-          <View style={styles.happinessBarContainer}>
-            <View style={styles.happinessBarBg}>
-              <Animated.View
-                style={[
-                  styles.happinessBarFill,
-                  {
-                    width: progressWidth,
-                    backgroundColor: moodConfig.color,
-                  },
-                ]}
-              />
-            </View>
-            <Text style={styles.happinessLabel}>{Math.round(happiness)}%</Text>
+          <View style={styles.barLabelRow}>
+            <Text style={styles.barLabel}>{t('pet.happiness')}</Text>
+            <Text style={styles.barLabelValue}>{Math.round(happiness)}%</Text>
+          </View>
+          <View style={styles.happinessBarBg}>
+            <Animated.View
+              style={[styles.happinessBarFill, { width: progressWidth, backgroundColor: happinessBarColor }]}
+            />
           </View>
         </View>
 
@@ -837,17 +886,28 @@ export default function PetScreen() {
               <ActivityIndicator size="small" color={Colors.softOrange} style={styles.dailyLoading} />
             ) : (
               <>
-                <View style={styles.dailyCalRow}>
-                  <Text style={styles.dailyCalMain}>
-                    {dailyNutrition.totalCalories} / {DAILY_CALORIE_GOAL_KCAL} kcal
-                  </Text>
-                  <Text style={styles.dailyCalSub}>
-                    {t('pet.caloriesRemaining', {
-                      count: Math.max(0, DAILY_CALORIE_GOAL_KCAL - dailyNutrition.totalCalories),
-                    })}
-                  </Text>
+                <View style={styles.barLabelRow}>
+                  <Text style={styles.calorieEaten}>{dailyNutrition.totalCalories} <Text style={styles.calorieUnit}>{t('pet.kcalEaten')}</Text></Text>
+                  {(() => {
+                    const cal = dailyNutrition.totalCalories;
+                    const remaining = calorieGoal - cal;
+                    if (calorieDirection === 'below') {
+                      return remaining > 0
+                        ? <Text style={styles.calorieGoalText}>{t('pet.caloriesRemaining', { count: remaining })}</Text>
+                        : <Text style={[styles.calorieGoalText, { color: '#E53935' }]}>{t('pet.caloriesOver', { count: cal - calorieGoal })}</Text>;
+                    } else {
+                      return cal >= calorieGoal
+                        ? <Text style={[styles.calorieGoalText, { color: '#43A047' }]}>{t('pet.calorieGoalReached')}</Text>
+                        : <Text style={styles.calorieGoalText}>{t('pet.caloriesToGo', { count: remaining })}</Text>;
+                    }
+                  })()}
                 </View>
-                <Text style={styles.barLabel}>{t('pet.todayNutrition')}</Text>
+                <View style={styles.happinessBarBg}>
+                  <Animated.View
+                    style={[styles.happinessBarFill, { width: calorieProgressWidth, backgroundColor: calorieBarColor }]}
+                  />
+                </View>
+                <Text style={[styles.barLabel, { marginTop: 14 }]}>{t('pet.todayNutrition')}</Text>
                 <Text style={styles.dailySectionHint}>{t('pet.todayNutritionHint')}</Text>
                 {dailyNutrition.nutrientItemTypesToday.length > 0 ? (
                   <View style={styles.nutrientChipWrap}>
@@ -925,11 +985,7 @@ export default function PetScreen() {
           <View style={styles.shadowEllipse} />
 
           <Text style={styles.tapHint}>
-            {mood === 'miserable'
-              ? t('pet.tapHint.miserable')
-              : mood === 'sad'
-                ? t('pet.tapHint.sad')
-                : t('pet.tapHint.default')}
+            {t(`pet.tapHint.${mood}`)}
           </Text>
 
           {IS_DEV && <View style={styles.colorThemeRow}>
@@ -1070,6 +1126,67 @@ export default function PetScreen() {
           </Pressable>
         </Modal>
 
+        {IS_DEV && (
+          <Modal visible={devMenuVisible} transparent animationType="fade" onRequestClose={() => setDevMenuVisible(false)}>
+            <Pressable style={styles.devModalOverlay} onPress={() => setDevMenuVisible(false)}>
+              <View style={styles.devModalCard}>
+                <Text style={styles.devModalTitle}>🛠 Dev Mode</Text>
+                <ScrollView style={styles.devModalScroll} showsVerticalScrollIndicator={false}>
+                  {DEV_SCENARIOS.map(({ label, demo }) => (
+                    <Pressable
+                      key={demo}
+                      style={styles.devModalItem}
+                      onPress={() => { setDevMenuVisible(false); router.push(`/camera?demo=${demo}` as any); }}
+                    >
+                      <Text style={styles.devModalItemText}>{label}</Text>
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    style={[styles.devModalItem, { marginTop: 8, backgroundColor: 'rgba(255,0,100,0.07)' }]}
+                    onPress={() => { setDevMenuVisible(false); devRestartOnboarding(); }}
+                  >
+                    <Text style={styles.devModalItemText}>🔄  Restart onboarding (ephemeral)</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.devModalItem, { backgroundColor: 'rgba(255,0,100,0.07)' }]}
+                    onPress={() => { setDevMenuVisible(false); devResetToFirstLaunch(); router.replace('/onboarding'); }}
+                  >
+                    <Text style={styles.devModalItemText}>🐣  Restart first launch (ephemeral)</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.devModalItem, { backgroundColor: 'rgba(0,100,255,0.07)' }]}
+                    onPress={async () => {
+                      try {
+                        await Notifications.requestPermissionsAsync();
+                        setDevMenuVisible(false);
+                        // Background the app, then come back — notification fires immediately on return.
+                        // Uses same content + data payload as notify-partner-photo edge function.
+                        await Notifications.scheduleNotificationAsync({
+                          content: {
+                            title: '@devpartner shared a meal! 🍽️',
+                            body: 'Tap to see what they ate.',
+                            sound: true,
+                            data: { screen: 'group' },
+                          },
+                          trigger: {
+                            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+                            seconds: 3,
+                            repeats: false,
+                          },
+                        });
+                      } catch (e) {
+                        Alert.alert('Notification Error', String(e));
+                      }
+                    }}
+                  >
+                    <Text style={styles.devModalItemText}>🔔  Simulate partner notification</Text>
+                  </Pressable>
+                </ScrollView>
+              </View>
+            </Pressable>
+          </Modal>
+        )}
+
         <Modal visible={menuOpen} transparent animationType="none">
           <View style={styles.menuBackdrop}>
             {/* Slide-in drawer */}
@@ -1082,7 +1199,7 @@ export default function PetScreen() {
                   <Package size={20} color={Colors.darkBrown} />
                   <Text style={styles.menuItemText}>{t('pet.menu.badges')}</Text>
                 </Pressable>
-                {__DEV__ && (
+                {IS_DEV && (
                   <Pressable style={styles.menuItem} onPress={handleItems}>
                     <Star size={20} color={Colors.darkBrown} />
                     <Text style={styles.menuItemText}>{t('pet.menu.items')}</Text>
@@ -1095,6 +1212,10 @@ export default function PetScreen() {
                 <Pressable style={styles.menuItem} onPress={handleGroup}>
                   <Users size={20} color={Colors.darkBrown} />
                   <Text style={styles.menuItemText}>{t('pet.menu.partner')}</Text>
+                </Pressable>
+                <Pressable style={styles.menuItem} onPress={handleGoals}>
+                  <Target size={20} color={Colors.darkBrown} />
+                  <Text style={styles.menuItemText}>{t('pet.menu.goals')}</Text>
                 </Pressable>
                 <Pressable style={styles.menuItem} onPress={handleSettings}>
                   <Settings size={20} color={Colors.darkBrown} />
@@ -1210,6 +1331,7 @@ export default function PetScreen() {
 
         <View style={styles.bottomActions}>
           <Pressable
+            ref={groupButtonRef}
             style={[styles.actionBtn, styles.groupBtn]}
             onPress={handleGroup}
             testID="group-button"
@@ -1217,6 +1339,7 @@ export default function PetScreen() {
             <Users size={22} color={Colors.darkBrown} />
           </Pressable>
           <Pressable
+            ref={cameraButtonRef}
             style={[styles.actionBtn, styles.cameraBtn]}
             onPress={handleCamera}
             testID="camera-button"
@@ -1226,8 +1349,20 @@ export default function PetScreen() {
           </Pressable>
         </View>
 
-        {onboardingStep >= 0 && onboardingStep <= 2 && (
-          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        {onboardingStep >= 0 && onboardingStep <= 3 && (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {spotlightRect && (() => {
+              const sx = Math.max(0, spotlightRect.x - SPOTLIGHT_PAD);
+              const sy = Math.max(0, spotlightRect.y - SPOTLIGHT_PAD);
+              const sw = spotlightRect.w + SPOTLIGHT_PAD * 2;
+              const sh = spotlightRect.h + SPOTLIGHT_PAD * 2;
+              const d = `M 0 0 H ${SCREEN_WIDTH} V ${SCREEN_HEIGHT} H 0 Z ${roundedRectPath(sx, sy, sw, sh, spotlightRect.r)}`;
+              return (
+                <Svg width={SCREEN_WIDTH} height={SCREEN_HEIGHT} style={StyleSheet.absoluteFill}>
+                  <Path fillRule="evenodd" fill="rgba(0,0,0,0.65)" d={d} />
+                </Svg>
+              );
+            })()}
             <View
               style={[
                 styles.onboardingCard,
@@ -1249,24 +1384,34 @@ export default function PetScreen() {
                   left: 20,
                   right: 20,
                 },
+                onboardingStep === 3 && {
+                  position: 'absolute' as const,
+                  bottom: insets.bottom + ONBOARD_STEP0_CARD_BOTTOM,
+                  left: 20,
+                  right: 20,
+                },
               ]}
             >
               <Text style={styles.onboardingEmoji}>
-                {onboardingStep === 0 ? '📸' : onboardingStep === 1 ? '🖼️' : '🏅'}
+                {onboardingStep === 0 ? '📸' : onboardingStep === 1 ? '🖼️' : onboardingStep === 2 ? '⚙️' : '🤝'}
               </Text>
               <Text style={styles.onboardingTitle}>
                 {onboardingStep === 0
                   ? t('pet.onboarding.shareTitle')
                   : onboardingStep === 1
                     ? t('pet.onboarding.albumTitle')
-                    : t('pet.onboarding.badgesTitle')}
+                    : onboardingStep === 2
+                      ? t('pet.onboarding.badgesTitle')
+                      : t('pet.onboarding.partnerTitle')}
               </Text>
               <Text style={styles.onboardingHint}>
                 {onboardingStep === 0
                   ? t('pet.onboarding.shareHint')
                   : onboardingStep === 1
                     ? t('pet.onboarding.albumHint')
-                    : t('pet.onboarding.badgesHint')}
+                    : onboardingStep === 2
+                      ? t('pet.onboarding.badgesHint')
+                      : t('pet.onboarding.partnerHint')}
               </Text>
             </View>
 
@@ -1291,78 +1436,61 @@ export default function PetScreen() {
                   <OnboardingTriangleDown color={Colors.softOrange} />
                 </Animated.View>
               )}
-              {onboardingStep === 1 && (
+              {onboardingStep === 1 && spotlightRect && (
                 <Animated.View
-                  style={[
-                    styles.onboardingTriangleDirected,
-                    {
-                      left: onboardAlbumGuideAdjusted.tipX - ONBOARD_TRIANGLE_HALF_W,
-                      top: onboardAlbumGuideAdjusted.tipY - ONBOARD_TRIANGLE_H,
-                      transform: [
-                        {
-                          translateX: onboardingArrowPulse.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0, albumPulseDx],
-                          }),
-                        },
-                        {
-                          translateY: onboardingArrowPulse.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0, albumPulseDy],
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.onboardingTriangleDirected,
+                  style={{
+                    position: 'absolute' as const,
+                    top: spotlightRect.y + spotlightRect.h + SPOTLIGHT_PAD + 2,
+                    left: spotlightRect.x + spotlightRect.w / 2 - ONBOARD_TRIANGLE_HALF_W,
+                    transform: [
+                      { rotate: '180deg' },
                       {
-                        transformOrigin: `${ONBOARD_TRIANGLE_HALF_W}px ${ONBOARD_TRIANGLE_H}px`,
-                        transform: [{ rotate: `${onboardAlbumTriangleRot}deg` }],
+                        translateY: onboardingArrowPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, -5],
+                        }),
                       },
-                    ]}
-                  >
-                    <OnboardingTriangleDown color={Colors.softOrange} />
-                  </View>
+                    ],
+                  }}
+                >
+                  <OnboardingTriangleDown color={Colors.softOrange} />
                 </Animated.View>
               )}
-              {onboardingStep === 2 && (
+              {onboardingStep === 2 && spotlightRect && (
                 <Animated.View
-                  style={[
-                    styles.onboardingTriangleDirected,
-                    {
-                      left: onboardMenuGuideAdjusted.tipX - ONBOARD_TRIANGLE_HALF_W,
-                      top: onboardMenuGuideAdjusted.tipY - ONBOARD_TRIANGLE_H,
-                      transform: [
-                        {
-                          translateX: onboardingArrowPulse.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0, menuPulseDx],
-                          }),
-                        },
-                        {
-                          translateY: onboardingArrowPulse.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0, menuPulseDy],
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.onboardingTriangleDirected,
+                  style={{
+                    position: 'absolute' as const,
+                    top: spotlightRect.y + spotlightRect.h + SPOTLIGHT_PAD + 2,
+                    left: spotlightRect.x + spotlightRect.w / 2 - ONBOARD_TRIANGLE_HALF_W,
+                    transform: [
+                      { rotate: '180deg' },
                       {
-                        transformOrigin: `${ONBOARD_TRIANGLE_HALF_W}px ${ONBOARD_TRIANGLE_H}px`,
-                        transform: [{ rotate: `${onboardMenuTriangleRot}deg` }],
+                        translateY: onboardingArrowPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, -5],
+                        }),
                       },
-                    ]}
-                  >
-                    <OnboardingTriangleDown color={Colors.softOrange} />
-                  </View>
+                    ],
+                  }}
+                >
+                  <OnboardingTriangleDown color={Colors.softOrange} />
+                </Animated.View>
+              )}
+              {onboardingStep === 3 && (
+                <Animated.View
+                  style={{
+                    position: 'absolute' as const,
+                    bottom: step0TriangleTipBottom,
+                    left: ONBOARD_GROUP_BTN_CENTER_X - ONBOARD_TRIANGLE_HALF_W,
+                    transform: [{
+                      translateY: onboardingArrowPulse.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, 5],
+                      }),
+                    }],
+                  }}
+                >
+                  <OnboardingTriangleDown color={Colors.softOrange} />
                 </Animated.View>
               )}
             </View>
@@ -1397,7 +1525,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: 'rgba(211, 211, 211)',
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
   },
@@ -1442,9 +1570,9 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
   albumBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: Colors.softOrange,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
@@ -1478,6 +1606,33 @@ const styles = StyleSheet.create({
   },
   barSection: {
     marginBottom: 8,
+  },
+  barLabelRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'baseline' as const,
+    marginBottom: 4,
+  },
+  barLabelValue: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    color: Colors.brown,
+  },
+  calorieEaten: {
+    fontSize: 16,
+    fontWeight: '800' as const,
+    color: Colors.darkBrown,
+  },
+  calorieUnit: {
+    fontSize: 11,
+    fontWeight: '500' as const,
+    color: Colors.brown,
+  },
+  calorieGoalText: {
+    fontSize: 11,
+    fontWeight: '500' as const,
+    color: Colors.brown,
+    opacity: 0.7,
   },
   barLabel: {
     fontSize: 12,
@@ -1515,7 +1670,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600' as const,
     color: Colors.brown,
-    width: 24,
+    width: 44,
     textAlign: 'right' as const,
   },
   happinessBarContainer: {
@@ -1525,7 +1680,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   happinessBarBg: {
-    flex: 1,
+    width: '100%' as const,
     height: 10,
     backgroundColor: 'rgba(255,255,255,0.5)',
     borderRadius: 5,
@@ -1930,6 +2085,38 @@ const styles = StyleSheet.create({
     width: 18,
     height: 11,
   },
+  streakSidebar: {
+    position: 'absolute' as const,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center' as const,
+    gap: 8,
+    zIndex: 10,
+  },
+  streakPill: {
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
+    paddingVertical: 10,
+    paddingLeft: 10,
+    paddingRight: 8,
+    alignItems: 'center' as const,
+    shadowColor: '#000',
+    shadowOffset: { width: -2, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  streakPillEmoji: {
+    fontSize: 18,
+  },
+  streakPillCount: {
+    fontSize: 14,
+    fontWeight: '800' as const,
+    color: Colors.darkBrown,
+    marginTop: 2,
+  },
   usernameModalCard: {
     width: '86%',
     maxWidth: 360,
@@ -2021,5 +2208,57 @@ const styles = StyleSheet.create({
     color: Colors.brown,
     textDecorationLine: 'underline' as const,
     opacity: 0.7,
+  },
+  // ── dev mode ────────────────────────────────────────────────────────────────
+  devBtn: {
+    backgroundColor: 'rgba(255,0,100,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,0,100,0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  devBtnText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: 'rgb(200,0,80)',
+    letterSpacing: 0.5,
+  },
+  devModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    padding: 32,
+  },
+  devModalCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    width: '100%' as const,
+    gap: 4,
+  },
+  devModalScroll: {
+    maxHeight: 420,
+  },
+  devModalTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.darkBrown,
+    marginBottom: 12,
+    textAlign: 'center' as const,
+  },
+  devModalItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(232,152,94,0.08)',
+    marginBottom: 4,
+  },
+  devModalItemText: {
+    fontSize: 14,
+    color: Colors.darkBrown,
+    fontWeight: '500' as const,
   },
 });

@@ -52,6 +52,7 @@ export interface AnalyzePhotoSuccess {
   calorie: number;
   nutrients: string[];
   healthScore: number;
+  reason?: string;
 }
 
 export type AnalyzePhotoFailureCode = 'RATE_LIMIT' | 'AUTH_REQUIRED';
@@ -116,29 +117,11 @@ async function resolveUserIdFromSession(accessTokenFromAuth?: string | null): Pr
 }
 
 async function invokeAnalyzePhoto(
-  body: { image?: string; imageUrl?: string },
+  body: { image?: string; imageUrl?: string; locale?: string },
   accessTokenFromAuth?: string | null
 ): Promise<AnalyzePhotoResult> {
   if (IS_DEV) {
-    const userId = await resolveUserIdFromSession(accessTokenFromAuth);
-    if (!userId) {
-      return {
-        success: false,
-        code: 'AUTH_REQUIRED',
-        raw: 'Sign in required for food analysis.',
-      };
-    }
-    const queryCount = await countUserLlmQueriesLast24h(userId);
-    if (isAtLlmQueryLimit(queryCount)) {
-      return {
-        success: false,
-        code: 'RATE_LIMIT',
-        raw: `Daily analysis limit reached (${LLM_QUERY_LIMIT} per 24 hours).`,
-      };
-    }
-    const result = makeDummyAnalyzeResponse();
-    await recordUserLlmQuery();
-    return result;
+    return makeDummyAnalyzeResponse();
   }
 
   let tokenSource: 'explicit' | 'session' | 'anon' = 'anon';
@@ -167,6 +150,7 @@ async function invokeAnalyzePhoto(
   });
 
   try {
+    console.log('[analyze-photo] sending locale:', body.locale);
     const { data, error } = await supabase.functions.invoke('analyze-photo', {
       body,
       ...(Object.keys(headers).length > 0 && { headers }),
@@ -183,17 +167,9 @@ async function invokeAnalyzePhoto(
         calorie: typeof data.calorie === 'number' ? data.calorie : 0,
         nutrients: data.nutrients.filter((n: unknown) => typeof n === 'string'),
         healthScore: typeof data.healthScore === 'number' ? Math.max(0, Math.min(10, Math.round(data.healthScore))) : 0,
+        ...(typeof data.reason === 'string' && data.reason.trim() && { reason: data.reason.trim() }),
       };
     }
-
-    console.error('[analyze-photo] unexpected response shape:', {
-      success: (data as { success?: unknown })?.success,
-      hasNutrientsArray: Array.isArray((data as { nutrients?: unknown })?.nutrients),
-      dataPreview:
-        typeof data === 'object' && data !== null
-          ? JSON.stringify(data).slice(0, 800)
-          : String(data),
-    });
 
     const failureData = data as {
       success?: false;
@@ -206,6 +182,17 @@ async function invokeAnalyzePhoto(
         : failureData?.code === 'AUTH_REQUIRED'
           ? 'AUTH_REQUIRED'
           : undefined;
+
+    if (!code) {
+      console.error('[analyze-photo] unexpected response shape:', {
+        success: (data as { success?: unknown })?.success,
+        hasNutrientsArray: Array.isArray((data as { nutrients?: unknown })?.nutrients),
+        dataPreview:
+          typeof data === 'object' && data !== null
+            ? JSON.stringify(data).slice(0, 800)
+            : String(data),
+      });
+    }
 
     return {
       success: false,
@@ -236,9 +223,10 @@ async function invokeAnalyzePhoto(
 
 export async function analyzePhotoByUrl(
   imageUrl: string,
-  accessTokenFromAuth?: string | null
+  accessTokenFromAuth?: string | null,
+  locale?: string,
 ): Promise<AnalyzePhotoResult> {
-  return invokeAnalyzePhoto({ imageUrl }, accessTokenFromAuth);
+  return invokeAnalyzePhoto({ imageUrl, locale }, accessTokenFromAuth);
 }
 
 /** Prefix so the Edge Function sets Claude `media_type` correctly (raw base64 used to default to JPEG). */
@@ -252,11 +240,12 @@ function base64WithDataUrlIfNeeded(base64: string): string {
 
 export async function analyzePhoto(
   localUri: string,
-  accessTokenFromAuth?: string | null
+  accessTokenFromAuth?: string | null,
+  locale?: string,
 ): Promise<AnalyzePhotoResult> {
   // Payload size is mainly controlled by ImagePicker `quality` on camera/library (see app/camera.tsx).
   const base64 = await FileSystem.readAsStringAsync(localUri, {
     encoding: FileSystem.EncodingType.Base64,
   });
-  return invokeAnalyzePhoto({ image: base64WithDataUrlIfNeeded(base64) }, accessTokenFromAuth);
+  return invokeAnalyzePhoto({ image: base64WithDataUrlIfNeeded(base64), locale }, accessTokenFromAuth);
 }

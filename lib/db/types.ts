@@ -137,18 +137,42 @@ export interface InsertUserStreak {
 
 export interface DbUserInfo {
   user_id: string;
-  username: string;
+  username: string | null;
+  is_admin: boolean;
+  sex: 'male' | 'female' | null;
+  height_cm: number | null;
+  weight_kg: number | null;
+  daily_calorie_goal: number | null;
+  /** true = above, false = below */
+  calorie_direction: boolean;
+  dietary_conditions: string[];
   created_at: string;
   updated_at: string;
 }
 
 export interface InsertUserInfo {
   user_id: string;
-  username: string;
+  username?: string | null;
+  is_admin?: boolean;
+  sex?: 'male' | 'female' | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  daily_calorie_goal?: number | null;
+  /** true = above, false = below */
+  calorie_direction?: boolean;
+  dietary_conditions?: string[];
 }
 
 export interface UpdateUserInfo {
-  username?: string;
+  username?: string | null;
+  is_admin?: boolean;
+  sex?: 'male' | 'female' | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  daily_calorie_goal?: number | null;
+  /** true = above, false = below */
+  calorie_direction?: boolean;
+  dietary_conditions?: string[];
   updated_at?: string;
 }
 

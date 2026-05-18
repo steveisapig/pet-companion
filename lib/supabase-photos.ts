@@ -101,6 +101,40 @@ export async function updatePetPhotoNutrientsAndCalories(
   });
 }
 
+/** Update only the calories column on an existing pet_photos row. */
+export async function updatePetPhotoCalories(photoId: number, calorie: number): Promise<void> {
+  const caloriesInt = Number.isFinite(calorie) ? Math.round(calorie) : 0;
+
+  const { data: updatedRow, error } = await supabaseClient
+    .from('pet_photos')
+    .update({ calories: caloriesInt })
+    .eq('id', photoId)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    dbLog('UPDATE', 'pet_photos', {
+      params: { photoId, caloriesInt },
+      error,
+      message: `Failed to update pet_photos calories: ${error.message}`,
+    });
+    throw error;
+  }
+
+  if (!updatedRow) {
+    const msg =
+      'pet_photos calories update affected 0 rows (missing row or RLS blocked UPDATE).';
+    dbLog('UPDATE', 'pet_photos', { params: { photoId, caloriesInt }, message: msg });
+    throw new Error(msg);
+  }
+
+  dbLog('UPDATE', 'pet_photos', {
+    params: { photoId },
+    result: 'ok',
+    message: `Updated calories for pet_photos id=${photoId} calories=${caloriesInt}`,
+  });
+}
+
 /**
  * Upload a photo from local URI to Supabase Storage and insert into pet_photos.
  * Requires userId (auth) and fetches pet to get petId.
@@ -365,6 +399,44 @@ export async function getPartnershipPhotos(
   }
 
   return { mine: mine.slice(0, limit), partner: partner.slice(0, limit) };
+}
+
+/**
+ * Delete a pet photo — removes the storage object and the pet_photos row.
+ * Storage removal is best-effort (won't throw if the file is already gone).
+ */
+export async function deletePetPhoto(photoId: number, storagePath: string): Promise<void> {
+  const { error: storageError } = await supabaseClient.storage
+    .from(BUCKET)
+    .remove([storagePath]);
+
+  if (storageError) {
+    dbLog('DELETE', 'storage', {
+      params: { storagePath },
+      error: storageError,
+      message: `Storage removal failed (continuing): ${storageError.message}`,
+    });
+  }
+
+  const { error } = await supabaseClient
+    .from('pet_photos')
+    .delete()
+    .eq('id', photoId);
+
+  if (error) {
+    dbLog('DELETE', 'pet_photos', {
+      params: { photoId },
+      error,
+      message: `Failed to delete pet_photos row: ${error.message}`,
+    });
+    throw error;
+  }
+
+  dbLog('DELETE', 'pet_photos', {
+    params: { photoId, storagePath },
+    result: 'ok',
+    message: `Deleted photo id=${photoId}`,
+  });
 }
 
 /**

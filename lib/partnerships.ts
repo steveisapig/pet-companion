@@ -11,6 +11,7 @@ import { lookupUserByUsername } from '@/lib/user-info';
 import { SMALLINT_TO_PET_TYPE } from '@/lib/db/types';
 import type { PartnershipGoalType, CaloriesDirection } from '@/lib/db/types';
 import type { PetType } from '@/constants/pets';
+import { getPartnershipPhotos } from '@/lib/supabase-photos';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const s = supabase as any;
@@ -24,6 +25,8 @@ export const GOAL_DEFAULTS: Record<PartnershipGoalType, number> = {
   calories: 3000,
   variety: 10,
 };
+
+export const MAX_PARTNERS = 5;
 
 export interface PartnerInfo {
   userId: string;
@@ -133,6 +136,84 @@ export async function getMyPartnership(myUserId: string): Promise<ActivePartners
 }
 
 /**
+ * Fetch ALL active partnerships for the calling user, with partner details.
+ * Uses batched queries (5 round-trips regardless of partner count).
+ */
+export async function getMyPartnerships(myUserId: string): Promise<ActivePartnership[]> {
+  const { data: memberRows } = await s
+    .from('partnership_members')
+    .select('partnership_id')
+    .eq('user_id', myUserId);
+  if (!memberRows?.length) return [];
+  const partnershipIds = (memberRows as { partnership_id: string }[]).map((r) => r.partnership_id);
+
+  const { data: partnerships } = await s
+    .from('partnerships')
+    .select('id, goal_type, goal_value, calories_direction, created_at')
+    .in('id', partnershipIds)
+    .eq('status', 1)
+    .order('created_at', { ascending: false });
+  if (!partnerships?.length) return [];
+
+  const activeIds = (partnerships as { id: string }[]).map((p) => p.id);
+
+  const { data: allMembers } = await s
+    .from('partnership_members')
+    .select('partnership_id, user_id')
+    .in('partnership_id', activeIds);
+
+  const partnerIdByPartnership = new Map<string, string>();
+  for (const m of (allMembers ?? []) as { partnership_id: string; user_id: string }[]) {
+    if (m.user_id !== myUserId) partnerIdByPartnership.set(m.partnership_id, m.user_id);
+  }
+  const allPartnerIds = [...new Set(partnerIdByPartnership.values())];
+  if (!allPartnerIds.length) return [];
+
+  const [{ data: partnerInfos }, { data: partnerPets }] = await Promise.all([
+    s.from('user_info').select('user_id, username').in('user_id', allPartnerIds),
+    s.from('pets').select('user_id, name, pet_type').in('user_id', allPartnerIds),
+  ]);
+
+  const infoByUser = new Map(
+    ((partnerInfos ?? []) as { user_id: string; username: string }[]).map((r) => [r.user_id, r]),
+  );
+  const petByUser = new Map(
+    ((partnerPets ?? []) as { user_id: string; name: string; pet_type: number }[]).map((r) => [r.user_id, r]),
+  );
+
+  return (
+    partnerships as {
+      id: string;
+      goal_type: PartnershipGoalType;
+      goal_value: number;
+      calories_direction: CaloriesDirection | null;
+      created_at: string;
+    }[]
+  )
+    .filter((p) => partnerIdByPartnership.has(p.id))
+    .map((p) => {
+      const partnerUserId = partnerIdByPartnership.get(p.id)!;
+      const info = infoByUser.get(partnerUserId);
+      const pet = petByUser.get(partnerUserId);
+      const petType: PetType =
+        (SMALLINT_TO_PET_TYPE as Record<number, PetType>)[(pet as { pet_type: number } | undefined)?.pet_type ?? -1] ?? 'mochi';
+      return {
+        id: p.id,
+        goalType: p.goal_type,
+        goalValue: p.goal_value,
+        caloriesDirection: p.calories_direction,
+        createdAt: p.created_at,
+        partner: {
+          userId: partnerUserId,
+          username: (info as { username: string } | undefined)?.username ?? null,
+          petName: (pet as { name: string } | undefined)?.name ?? null,
+          petType,
+        },
+      };
+    });
+}
+
+/**
  * Fetch all pending invites for the calling user — both incoming and outgoing.
  * Attaches usernames from user_info for the other party on each invite.
  */
@@ -237,7 +318,7 @@ export async function sendInvite(
     goal_value: goalValue,
     calories_direction: caloriesDirection ?? null,
   });
-  if (error?.code === 'P0001') return 'You already have 2 pending invites. Cancel one first.';
+  if (error?.code === 'P0001') return `You already have ${MAX_PARTNERS} pending invites. Cancel one first.`;
   if (error?.code === '23505') return 'You already have a pending invite to this person.';
   if (error) return error.message;
   return null;
@@ -305,4 +386,71 @@ export async function leavePartnership(
     .eq('id', partnershipId);
   if (error) return error.message;
   return null;
+}
+
+// ─── Goal streak ──────────────────────────────────────────────────────────────
+
+/** Upsert today's local date into partnership_goal_days — idempotent, safe to call multiple times. */
+export async function recordPartnershipGoalDay(partnershipId: string): Promise<void> {
+  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+  const { error } = await s
+    .from('partnership_goal_days')
+    .upsert({ partnership_id: partnershipId, day: today }, { onConflict: 'partnership_id,day' });
+  if (error) throw error;
+}
+
+/** Returns the number of consecutive days the partnership hit its goal, ending today or yesterday. */
+export async function getPartnershipStreak(partnershipId: string): Promise<number> {
+  const { data, error } = await s
+    .from('partnership_goal_days')
+    .select('day')
+    .eq('partnership_id', partnershipId)
+    .order('day', { ascending: false })
+    .limit(365);
+  if (error || !data?.length) return 0;
+
+  const days = new Set<string>((data as { day: string }[]).map((r) => r.day));
+  const msPerDay = 86_400_000;
+  let streak = 0;
+  // Start from yesterday — today is still in progress
+  let cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  cursor = new Date(cursor.getTime() - msPerDay);
+  while (days.has(cursor.toLocaleDateString('en-CA'))) {
+    streak++;
+    cursor = new Date(cursor.getTime() - msPerDay);
+  }
+  return streak;
+}
+
+/**
+ * After a photo upload, re-check today's combined progress.
+ * If the goal is met (≥100%), record today as a goal day.
+ */
+export async function checkAndRecordGoalHit(
+  partnership: ActivePartnership,
+  myUserId: string,
+): Promise<void> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const { mine, partner } = await getPartnershipPhotos(
+    myUserId,
+    partnership.partner.userId,
+    todayStart.toISOString(),
+    200,
+  );
+  const all = [...mine, ...partner];
+  const combinedCalories = all.reduce((s, p) => s + (p.calories ?? 0), 0);
+  const combinedNutrients = new Set(all.flatMap((p) => p.nutrients ?? [])).size;
+
+  let progress: number;
+  switch (partnership.goalType) {
+    case 'calories':  progress = combinedCalories / partnership.goalValue; break;
+    case 'nutrients':
+    case 'variety':   progress = combinedNutrients / partnership.goalValue; break;
+  }
+
+  if (progress >= 1) {
+    await recordPartnershipGoalDay(partnership.id);
+  }
 }

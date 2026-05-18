@@ -12,8 +12,7 @@ try {
   Notifications = require('expo-notifications');
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
+      shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
     }),
@@ -41,6 +40,17 @@ const NOTIFICATION_THRESHOLDS = [
 ];
 
 const MINUTES_PER_POINT = 30;
+const HAPPINESS_ID_PREFIX = 'happiness_';
+
+async function cancelHappinessNotifications(): Promise<void> {
+  const scheduled: { identifier: string }[] =
+    await Notifications.getAllScheduledNotificationsAsync();
+  await Promise.all(
+    scheduled
+      .filter((n) => n.identifier.startsWith(HAPPINESS_ID_PREFIX))
+      .map((n) => Notifications.cancelScheduledNotificationAsync(n.identifier))
+  );
+}
 
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (!Notifications) return false;
@@ -59,7 +69,7 @@ export async function scheduleHappinessNotifications(petName: string, currentHap
   if (!Notifications) return;
   try {
     await initializeI18n();
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    await cancelHappinessNotifications();
 
     const name = petName || i18n.t('notifications.fallbackPetName');
     const now = Date.now();
@@ -72,6 +82,7 @@ export async function scheduleHappinessNotifications(petName: string, currentHap
       const triggerTime = new Date(now + pointsUntilThreshold * MINUTES_PER_POINT * 60 * 1000);
 
       await Notifications.scheduleNotificationAsync({
+        identifier: `${HAPPINESS_ID_PREFIX}${threshold.happiness}`,
         content: {
           title: threshold.title(name),
           body: threshold.body(),

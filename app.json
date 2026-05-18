@@ -3,7 +3,7 @@
     "name": "Marumimi",
     "slug": "virtual-pet-life",
     "owner": "ywang155",
-    "version": "1.3.0",
+    "version": "1.5.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rork-app",
@@ -50,6 +50,7 @@
     },
     "plugins": [
       "./plugins/with-cxx17",
+      "./plugins/with-native-segmentation",
       "expo-font",
       "expo-sqlite",
       [

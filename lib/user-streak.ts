@@ -103,17 +103,16 @@ export async function fetchAllUserStreakDates(userId: string): Promise<string[]>
 }
 
 /**
- * Consecutive days ending at the user's most recent streak day (gap breaks the count).
+ * Consecutive completed days ending at yesterday (today is never counted — the day isn't over).
+ * A gap in past days resets the count to 0.
  */
 export function computeStreakLengthFromDates(sortedUniqueAsc: string[]): number {
   if (sortedUniqueAsc.length === 0) return 0;
   const set = new Set(sortedUniqueAsc);
-  const last = sortedUniqueAsc[sortedUniqueAsc.length - 1];
-  let d = parseLocalDateString(last);
+  // Start from yesterday — today is still in progress
+  let d = addDaysLocal(new Date(), -1);
   let count = 0;
-  while (true) {
-    const key = formatLocalDateString(d);
-    if (!set.has(key)) break;
+  while (set.has(formatLocalDateString(d))) {
     count++;
     d = addDaysLocal(d, -1);
   }

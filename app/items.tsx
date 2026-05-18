@@ -10,7 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
+import { ArrowLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { NUTRIENT_TO_ITEM_TYPE, ITEM_TYPE_EMOJI } from '@/constants/badge-types';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -58,7 +58,7 @@ export default function ItemsScreen() {
         <View style={styles.header}>
           <View style={[styles.headerSide, styles.headerSideZ]}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
-              <ChevronLeft size={24} color={Colors.darkBrown} />
+              <ArrowLeft size={18} color="#FFF" />
             </Pressable>
           </View>
           <Text style={styles.title} pointerEvents="none">
@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    backgroundColor: 'rgba(211, 211, 211)',
     justifyContent: 'center',
     alignItems: 'center',
   },

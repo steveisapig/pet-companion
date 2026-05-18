@@ -11,7 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
@@ -130,7 +130,7 @@ export default function StreakScreen() {
         <View style={styles.header}>
           <View style={[styles.headerSide, styles.headerSideZ]}>
             <Pressable style={styles.backBtn} onPress={() => router.back()}>
-              <ChevronLeft size={24} color={Colors.darkBrown} />
+              <ArrowLeft size={18} color="#FFF" />
             </Pressable>
           </View>
           <Text style={styles.title} pointerEvents="none">
@@ -238,8 +238,9 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   backBtn: {
-    padding: 4,
-    marginLeft: -4,
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(211, 211, 211)',
+    justifyContent: 'center', alignItems: 'center',
   },
   title: {
     fontSize: 22,

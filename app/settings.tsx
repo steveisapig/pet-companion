@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { Check, ChevronDown, Mail } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -19,6 +20,10 @@ import type { LanguagePreference } from '@/providers/I18nProvider';
 import { usePet } from '@/providers/PetProvider';
 import PetPortrait from '@/components/PetPortrait';
 import { PET_CONFIGS } from '@/constants/pets';
+import {
+  getFoodScannerEnabled,
+  setFoodScannerEnabled,
+} from '@/lib/camera-settings-storage';
 
 const IS_DEV = Constants.expoConfig?.extra?.IS_DEV === true;
 
@@ -58,6 +63,18 @@ export default function SettingsScreen() {
   const { petType, mood, petPrimaryColor, setPetPrimaryColor } = usePet();
 
   const options: LanguagePreference[] = ['system', 'en', 'ja', 'zhHans', 'zhHant'];
+
+  const [foodScannerEnabled, setFoodScannerEnabledState] = useState(false);
+  useEffect(() => {
+    getFoodScannerEnabled().then(setFoodScannerEnabledState);
+  }, []);
+
+  const toggleFoodScanner = () => {
+    const next = !foodScannerEnabled;
+    setFoodScannerEnabledState(next);
+    setFoodScannerEnabled(next);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   return (
     <View style={styles.container}>
@@ -186,6 +203,21 @@ export default function SettingsScreen() {
                 );
               })}
             </View>
+          </View>
+
+          {/* ── Food Scanner ─────────────────────────────────────── */}
+          <View style={[styles.card, styles.cardSpacing]}>
+            <Text style={styles.sectionTitle}>{t('settings.foodScanner')}</Text>
+            <Text style={styles.sectionHint}>{t('settings.foodScannerHint')}</Text>
+            <Pressable
+              style={[styles.optionRow, foodScannerEnabled && styles.optionRowSelected]}
+              onPress={toggleFoodScanner}
+            >
+              <Text style={styles.optionLabel}>{t('settings.foodScanner')}</Text>
+              <View style={[styles.radio, foodScannerEnabled && styles.radioSelected]}>
+                {foodScannerEnabled && <Check size={16} color="#FFF" />}
+              </View>
+            </Pressable>
           </View>
 
           {/* ── Contact ───────────────────────────────────────────── */}

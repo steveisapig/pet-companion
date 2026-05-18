@@ -1,8 +1,9 @@
 import { supabase } from '@/lib/supabase';
 
-/** 3–20 chars: lowercase letters, numbers, dots, underscores */
+/** 1–20 characters (Unicode code points), no whitespace */
 export function isValidUsername(raw: string): boolean {
-  return /^[a-z0-9._]{3,20}$/.test(raw);
+  const len = Array.from(raw).length;
+  return len >= 1 && len <= 20 && !/\s/u.test(raw);
 }
 
 /** Strip leading @, lowercase, trim */
@@ -45,6 +46,71 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
     .eq('username', normaliseUsername(username))
     .maybeSingle();
   return data === null;
+}
+
+// ─── body profile ─────────────────────────────────────────────────────────────
+
+export interface RemoteBodyProfile {
+  sex: 'male' | 'female' | null;
+  heightCm: number | null;
+  weightKg: number | null;
+  dailyCalorieGoal: number | null;
+  calorieDirection: 'above' | 'below' | null;
+  dietaryConditions: string[];
+}
+
+/** Upsert body-profile columns for the current user (best-effort, no throw). */
+export async function saveBodyProfileToSupabase(
+  userId: string,
+  profile: RemoteBodyProfile,
+): Promise<void> {
+  await (supabase as any)
+    .from('user_info')
+    .upsert(
+      {
+        user_id: userId,
+        sex: profile.sex,
+        height_cm: profile.heightCm,
+        weight_kg: profile.weightKg,
+        daily_calorie_goal: profile.dailyCalorieGoal,
+        // DB stores boolean: true = above, false = below
+        calorie_direction: profile.calorieDirection === 'above',
+        dietary_conditions: profile.dietaryConditions,
+      },
+      { onConflict: 'user_id' },
+    )
+    .then(({ error }: { error: unknown }) => {
+      if (error) console.warn('[user-info] saveBodyProfile error:', error);
+    });
+}
+
+/** Fetch body-profile columns for the current user. Returns null if no row. */
+export async function getBodyProfileFromSupabase(
+  userId: string,
+): Promise<RemoteBodyProfile | null> {
+  const { data } = await supabase
+    .from('user_info')
+    .select('sex, height_cm, weight_kg, daily_calorie_goal, calorie_direction, dietary_conditions')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!data) return null;
+  const row = data as {
+    sex: string | null;
+    height_cm: number | null;
+    weight_kg: number | null;
+    daily_calorie_goal: number | null;
+    calorie_direction: boolean;
+    dietary_conditions: string[] | null;
+  };
+  return {
+    sex: (row.sex === 'male' || row.sex === 'female') ? row.sex : null,
+    heightCm: row.height_cm ?? null,
+    weightKg: row.weight_kg ?? null,
+    dailyCalorieGoal: row.daily_calorie_goal ?? null,
+    // Convert boolean back to string direction
+    calorieDirection: row.calorie_direction ? 'above' : 'below',
+    dietaryConditions: row.dietary_conditions ?? [],
+  };
 }
 
 /** Look up a user by their handle. Returns { user_id, username } or null if not found. */

@@ -9,18 +9,19 @@ import {
   ScrollView,
   Dimensions,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, LayoutGrid, List } from 'lucide-react-native';
+import { ArrowLeft, LayoutGrid, List, Trash2 } from 'lucide-react-native';
 import { router, useFocusEffect } from 'expo-router';
 import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
-import { getPetPhotos, type PetPhoto } from '@/lib/supabase-photos';
+import { getPetPhotos, deletePetPhoto, type PetPhoto } from '@/lib/supabase-photos';
 import { getAlbumPhotos } from '@/lib/photo-album';
 import { getItemTypeDisplay } from '@/constants/badge-types';
 
@@ -132,6 +133,31 @@ export default function AlbumScreen() {
   const [viewMode, setViewMode] = useState<AlbumViewMode>('list');
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleDelete = useCallback(
+    (photo: PetPhoto) => {
+      Alert.alert('Delete photo?', 'This cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            queryClient.setQueryData<PetPhoto[]>(
+              ['albumPhotos', userId],
+              (prev) => prev?.filter((p) => p.id !== photo.id) ?? [],
+            );
+            try {
+              await deletePetPhoto(photo.id, photo.storage_path);
+            } catch {
+              await refetch();
+            }
+          },
+        },
+      ]);
+    },
+    [userId, queryClient, refetch],
+  );
 
   const { data: photos = [], isLoading, refetch } = useQuery({
     queryKey: ['albumPhotos', userId],
@@ -197,17 +223,30 @@ export default function AlbumScreen() {
             {item.calories != null ? `${item.calories} cal` : '—'}
           </Text>
         </View>
+        <Pressable
+          style={styles.deleteBtn}
+          onPress={() => handleDelete(item)}
+          hitSlop={8}
+        >
+          <Trash2 size={16} color={Colors.gray} />
+        </Pressable>
       </Pressable>
     ),
-    [openGallery]
+    [openGallery, handleDelete]
   );
 
   const renderSectionHeader = useCallback(
-    ({ section }: { section: { title: string } }) => (
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
-      </View>
-    ),
+    ({ section }: { section: { title: string; data: PetPhoto[] } }) => {
+      const totalCal = section.data.reduce((sum, p) => sum + (p.calories ?? 0), 0);
+      return (
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>{section.title}</Text>
+          {totalCal > 0 && (
+            <Text style={styles.sectionCalories}>Total: {totalCal} cal</Text>
+          )}
+        </View>
+      );
+    },
     []
   );
 
@@ -221,8 +260,7 @@ export default function AlbumScreen() {
       <View style={[styles.content, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <ChevronLeft size={24} color={Colors.darkBrown} />
-            <Text style={styles.backText}>{t('common.back')}</Text>
+            <ArrowLeft size={18} color="#FFF" />
           </Pressable>
           <Text style={styles.headerTitle}>Marumimi</Text>
           <View style={styles.headerRight}>
@@ -233,9 +271,9 @@ export default function AlbumScreen() {
               accessibilityLabel={viewMode === 'list' ? t('album.showPhotoGrid') : t('album.showListByDay')}
             >
               {viewMode === 'list' ? (
-                <LayoutGrid size={22} color={Colors.darkBrown} />
+                <LayoutGrid size={18} color="#FFF" />
               ) : (
-                <List size={22} color={Colors.darkBrown} />
+                <List size={18} color="#FFF" />
               )}
             </Pressable>
           </View>
@@ -306,7 +344,6 @@ export default function AlbumScreen() {
           photos={photos}
           initialIndex={galleryIndex}
           onClose={() => setGalleryIndex(null)}
-          showSave
         />
       </View>
     </View>
@@ -328,14 +365,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   backBtn: {
-    flexDirection: 'row' as const,
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(211, 211, 211)',
+    justifyContent: 'center' as const,
     alignItems: 'center' as const,
-    minWidth: 80,
-  },
-  backText: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    color: Colors.darkBrown,
   },
   headerTitle: {
     fontSize: 18,
@@ -349,9 +382,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end' as const,
   },
   viewToggle: {
-    padding: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(211, 211, 211)',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
   },
   skeletonGrid: {
     flexDirection: 'row' as const,
@@ -397,6 +431,9 @@ const styles = StyleSheet.create({
     height: 4,
   },
   sectionHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
     backgroundColor: 'transparent',
     paddingVertical: 8,
     paddingTop: 4,
@@ -406,6 +443,11 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: Colors.brown,
     opacity: 0.9,
+  },
+  sectionCalories: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.softOrange,
   },
   listRow: {
     flexDirection: 'row' as const,
@@ -463,6 +505,10 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: Colors.darkBrown,
     flexShrink: 1,
+  },
+  deleteBtn: {
+    alignSelf: 'flex-end' as const,
+    padding: 4,
   },
   caloriesLine: {
     fontSize: 14,

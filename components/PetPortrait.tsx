@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { View, Image, StyleSheet, Image as RNImage, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Image as SvgImage, Defs, Filter, FeColorMatrix, G } from 'react-native-svg';
 import { PET_CONFIGS, getPetImageForMood, type MoodLevel, type PetType } from '@/constants/pets';
-
 // ─── Hue math ─────────────────────────────────────────────────────────────────
 
 /**

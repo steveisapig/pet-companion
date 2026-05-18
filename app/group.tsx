@@ -11,12 +11,13 @@ import {
   ActivityIndicator,
   Animated,
   Image,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 // useFocusEffect is used to refetch on screen focus
-import { ChevronLeft, Users, Target, Zap, Check, Trash2, X, Clock } from 'lucide-react-native';
+import { ArrowLeft, Users, Target, Zap, Check, Trash2, X, Clock } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -24,7 +25,7 @@ import { usePet } from '@/providers/PetProvider';
 import PetPortrait from '@/components/PetPortrait';
 import { normaliseUsername, isValidUsername, checkUsernameAvailable, setMyUsername } from '@/lib/user-info';
 import {
-  getMyPartnership,
+  getMyPartnerships,
   getMyPendingInvites,
   lookupPartnerByHandle,
   sendInvite,
@@ -32,7 +33,9 @@ import {
   declineInvite,
   acceptInvite,
   leavePartnership,
+  getPartnershipStreak,
   GOAL_DEFAULTS,
+  MAX_PARTNERS,
   type ActivePartnership,
   type PendingInvite,
   type PartnershipGoalType,
@@ -45,7 +48,7 @@ import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Screen = 'loading' | 'no-username' | 'none' | 'found' | 'goal-select' | 'pending-outgoing' | 'active';
+type Screen = 'loading' | 'no-username' | 'none' | 'add-partner' | 'found' | 'goal-select' | 'pending-outgoing' | 'active';
 
 interface FoundUser {
   userId: string;
@@ -196,7 +199,7 @@ export default function GroupScreen() {
   // ── Local navigation state (server-free transitions) ──────────────────────
   // 'found' and 'goal-select' are local UI steps; the rest are derived from
   // server queries below.
-  const [localScreen, setLocalScreen] = useState<'found' | 'goal-select' | null>(null);
+  const [localScreen, setLocalScreen] = useState<'found' | 'goal-select' | 'add-partner' | null>(null);
 
   // Gallery: which photo array is open + starting index
   const [galleryPhotos, setGalleryPhotos] = useState<PetPhoto[]>([]);
@@ -232,27 +235,37 @@ export default function GroupScreen() {
 
   // ── Queries (cached to AsyncStorage via PersistQueryClientProvider) ────────
 
-  // Active partnership — stale after 30 s, kept on device for 24 h.
+  // All active partnerships — stale after 30 s, kept on device for 24 h.
   const {
-    data: activePartnership = null,
+    data: activePartnerships = [],
     isLoading: partnershipLoading,
+    isError: partnershipError,
     refetch: refetchPartnership,
   } = useQuery({
-    queryKey: ['myPartnership', userId],
-    queryFn: () => getMyPartnership(userId!),
+    queryKey: ['myPartnerships', userId],
+    queryFn: () => getMyPartnerships(userId!),
     enabled: !!userId,
     staleTime: 30_000,
     gcTime: 24 * 60 * 60 * 1000,
+    retry: 1,
   });
 
-  // Pending invites — only needed when there's no active partnership.
+  const [selectedPartnershipId, setSelectedPartnershipId] = useState<string | null>(null);
+
+  // The currently displayed partnership (selected or first).
+  const activePartnership = useMemo(
+    () => activePartnerships.find((p) => p.id === selectedPartnershipId) ?? activePartnerships[0] ?? null,
+    [activePartnerships, selectedPartnershipId],
+  );
+
+  // Pending invites — always fetched so they're visible in the add-partner flow.
   const {
     data: invitesData = [],
     refetch: refetchInvites,
   } = useQuery({
     queryKey: ['myPendingInvites', userId],
     queryFn: () => getMyPendingInvites(userId!),
-    enabled: !!userId && activePartnership === null && !partnershipLoading,
+    enabled: !!userId,
     staleTime: 15_000,
     gcTime: 60 * 60 * 1000,
   });
@@ -265,6 +278,13 @@ export default function GroupScreen() {
     () => invitesData.find((i) => i.direction === 'outgoing') ?? null,
     [invitesData],
   );
+
+  const { data: partnershipStreak = 0, refetch: refetchStreak } = useQuery({
+    queryKey: ['partnershipStreak', activePartnership?.id],
+    queryFn: () => getPartnershipStreak(activePartnership!.id),
+    enabled: !!activePartnership,
+    staleTime: 60_000,
+  });
 
   // Partnership photos — cached per partnership, stale after 60 s.
   const {
@@ -286,19 +306,19 @@ export default function GroupScreen() {
   const myPhotos = photosData?.mine ?? [];
   const partnerPhotos = photosData?.partner ?? [];
 
-  // Derived screen — local overrides (found / goal-select) take precedence.
+  // Derived screen — local overrides (found / goal-select / add-partner) take precedence.
   const screen: Screen = useMemo(() => {
     if (localScreen) return localScreen;
-    if (partnershipLoading) return 'loading';
-    if (activePartnership) return 'active';
+    if (partnershipLoading && !partnershipError) return 'loading';
+    if (activePartnerships.length > 0) return 'active';
     if (outgoingInvite) return 'pending-outgoing';
     if (!username) return 'no-username';
     return 'none';
-  }, [localScreen, partnershipLoading, activePartnership, outgoingInvite, username]);
+  }, [localScreen, partnershipLoading, partnershipError, activePartnerships.length, outgoingInvite, username]);
 
   // Helper: invalidate all partnership-related queries.
   const invalidateAll = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['myPartnership', userId] });
+    queryClient.invalidateQueries({ queryKey: ['myPartnerships', userId] });
     queryClient.invalidateQueries({ queryKey: ['myPendingInvites', userId] });
   }, [queryClient, userId]);
 
@@ -334,8 +354,19 @@ export default function GroupScreen() {
   useFocusEffect(useCallback(() => {
     refetchPartnership();
     refetchInvites();
-    if (activePartnership) refetchPhotos();
-  }, [refetchPartnership, refetchInvites, refetchPhotos, activePartnership]));
+    if (activePartnership) { refetchPhotos(); refetchStreak(); }
+  }, [refetchPartnership, refetchInvites, refetchPhotos, refetchStreak, activePartnership]));
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([
+      refetchPartnership(),
+      refetchInvites(),
+      ...(activePartnership ? [refetchPhotos(), refetchStreak()] : []),
+    ]);
+    setRefreshing(false);
+  }, [refetchPartnership, refetchInvites, refetchPhotos, refetchStreak, activePartnership]);
 
   // (Photos are fetched by the useQuery above — no manual effect needed.)
 
@@ -378,6 +409,10 @@ export default function GroupScreen() {
     }
     if (result.userId === userId) {
       Alert.alert(t('group.none.thatsYouTitle'), t('group.none.thatsYouMsg'));
+      return;
+    }
+    if (activePartnerships.some((p) => p.partner.userId === result.userId)) {
+      Alert.alert('Already partners', `You are already partnered with @${result.username}.`);
       return;
     }
 
@@ -482,17 +517,22 @@ export default function GroupScreen() {
           text: t('group.active.leaveBtn'),
           style: 'destructive',
           onPress: async () => {
+            const isLastPartner = activePartnerships.length <= 1;
             const err = await leavePartnership(activePartnership.id, userId);
             if (err) { Alert.alert('Error', err); return; }
-            // Purge cached partnership so the 'none' screen shows immediately on return.
-            queryClient.removeQueries({ queryKey: ['myPartnership', userId] });
             queryClient.removeQueries({ queryKey: ['partnershipPhotos'] });
-            router.replace('/pet');
+            setSelectedPartnershipId(null);
+            if (isLastPartner) {
+              queryClient.removeQueries({ queryKey: ['myPartnerships', userId] });
+              router.replace('/pet');
+            } else {
+              queryClient.invalidateQueries({ queryKey: ['myPartnerships', userId] });
+            }
           },
         },
       ]
     );
-  }, [activePartnership, userId, queryClient, invalidateAll]);
+  }, [activePartnership, activePartnerships.length, userId, queryClient, t]);
 
   // ── Loading ────────────────────────────────────────────────────────────────
 
@@ -529,8 +569,14 @@ export default function GroupScreen() {
       <View style={[styles.safeContent, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }]}>
         {/* Header */}
         <View style={styles.header}>
-          <Pressable style={styles.backBtn} onPress={() => router.back()}>
-            <ChevronLeft size={24} color={Colors.darkBrown} />
+          <Pressable
+            style={styles.backBtn}
+            onPress={() => {
+              if (localScreen) { setLocalScreen(null); }
+              else { router.back(); }
+            }}
+          >
+            <ArrowLeft size={18} color="#FFF" />
           </Pressable>
           <Text style={styles.title}>{t('group.title')}</Text>
           {screen === 'active' ? (
@@ -542,7 +588,13 @@ export default function GroupScreen() {
           )}
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scroll}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.brown} />
+          }
+        >
 
           {/* ── No username — prompt to set handle ──────────────────── */}
           {screen === 'no-username' && (
@@ -708,6 +760,107 @@ export default function GroupScreen() {
                   <Text style={styles.devBtnText}>DEV: Skip search — show found screen</Text>
                 </Pressable>
               )}
+            </>
+          )}
+
+          {/* ── Add partner (has existing partners, adding more) ─────── */}
+          {screen === 'add-partner' && (
+            <>
+              {/* Existing partners row */}
+              {activePartnerships.length > 0 && (
+                <View style={[styles.card, { marginBottom: 16 }]}>
+                  <Text style={styles.sectionTitle}>{t('group.addPartner.existingTitle')}</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.partnerRowScroll}
+                    contentContainerStyle={styles.partnerRowContent}
+                  >
+                    {activePartnerships.map((p) => (
+                      <Pressable
+                        key={p.id}
+                        style={styles.partnerCircleWrap}
+                        onPress={() => { setSelectedPartnershipId(p.id); setLocalScreen(null); Haptics.selectionAsync(); }}
+                      >
+                        <View style={styles.partnerCirclePortrait}>
+                          <PetPortrait petType={p.partner.petType} mood="happy" primaryColor={null} style={styles.partnerCircleImg} />
+                        </View>
+                        <Text style={styles.partnerCircleName} numberOfLines={1}>{p.partner.petName ?? '?'}</Text>
+                        {p.partner.username ? (
+                          <Text style={styles.partnerCircleSub} numberOfLines={1}>@{p.partner.username}</Text>
+                        ) : null}
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Incoming invite inbox */}
+              {incomingInvites.length > 0 && (
+                <View style={styles.inviteInbox}>
+                  <Text style={styles.inboxTitle}>{t('group.none.inboxTitle')}</Text>
+                  {incomingInvites.map((inv) => (
+                    <View key={inv.id} style={styles.inviteRow}>
+                      <View style={styles.inviteInfo}>
+                        <Text style={styles.inviteFrom}>@{inv.fromUsername ?? inv.fromUserId}</Text>
+                        <Text style={styles.inviteGoal}>
+                          {goalOptions.find((g) => g.type === inv.goalType)?.emoji}{' '}
+                          {goalLabel(inv.goalType, inv.goalValue, inv.caloriesDirection, t)}
+                        </Text>
+                      </View>
+                      <View style={styles.inviteActions}>
+                        <Pressable
+                          style={[styles.inviteBtn, styles.inviteAcceptBtn]}
+                          onPress={() => handleAcceptInvite(inv)}
+                          disabled={acceptingId === inv.id}
+                        >
+                          {acceptingId === inv.id
+                            ? <ActivityIndicator size="small" color="#FFF" />
+                            : <Text style={styles.inviteAcceptText}>{t('group.invite.accept')}</Text>}
+                        </Pressable>
+                        <Pressable
+                          style={[styles.inviteBtn, styles.inviteDeclineBtn]}
+                          onPress={() => handleDeclineInvite(inv)}
+                          disabled={decliningId === inv.id}
+                        >
+                          {decliningId === inv.id
+                            ? <ActivityIndicator size="small" color={Colors.gray} />
+                            : <X size={16} color={Colors.gray} />}
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Find partner card */}
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>{t('group.none.findTitle')}</Text>
+                <View style={styles.handleInputRow}>
+                  <Text style={styles.handlePrefix}>@</Text>
+                  <TextInput
+                    style={styles.handleInput}
+                    placeholder={t('group.none.findPlaceholder')}
+                    placeholderTextColor={Colors.gray}
+                    value={searchHandle}
+                    onChangeText={(v) => setSearchHandle(normaliseUsername(v))}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    maxLength={12}
+                    onSubmitEditing={handleSearch}
+                    returnKeyType="search"
+                  />
+                </View>
+                <Pressable
+                  style={[styles.secondaryBtn, !searchHandle.trim() && styles.btnDisabled]}
+                  onPress={handleSearch}
+                  disabled={!searchHandle.trim() || searching}
+                >
+                  {searching
+                    ? <ActivityIndicator size="small" color="#FFF" />
+                    : <Text style={styles.secondaryBtnText}>{t('group.none.findBtn')}</Text>}
+                </Pressable>
+              </View>
             </>
           )}
 
@@ -921,8 +1074,44 @@ export default function GroupScreen() {
           {screen === 'active' && activePartnership && goalOption && (() => {
             const partner = activePartnership.partner;
             const partnerName = partner.petName ?? t('group.active.partnerLabel');
+            const selectedId = selectedPartnershipId ?? activePartnerships[0]?.id ?? null;
             return (
               <>
+                {/* Partner selector row — circles for each partner + Add button */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.partnerRowScroll}
+                  contentContainerStyle={styles.partnerRowContent}
+                >
+                  {activePartnerships.map((p) => (
+                    <Pressable
+                      key={p.id}
+                      style={styles.partnerCircleWrap}
+                      onPress={() => { setSelectedPartnershipId(p.id); Haptics.selectionAsync(); }}
+                    >
+                      <View style={[styles.partnerCirclePortrait, p.id === selectedId && styles.partnerCircleSelected]}>
+                        <PetPortrait petType={p.partner.petType} mood="happy" primaryColor={null} style={styles.partnerCircleImg} />
+                      </View>
+                      <Text style={styles.partnerCircleName} numberOfLines={1}>{p.partner.petName ?? '?'}</Text>
+                      {p.partner.username ? (
+                        <Text style={styles.partnerCircleSub} numberOfLines={1}>@{p.partner.username}</Text>
+                      ) : null}
+                    </Pressable>
+                  ))}
+                  {activePartnerships.length < MAX_PARTNERS && (
+                    <Pressable
+                      style={styles.partnerCircleWrap}
+                      onPress={() => { setLocalScreen('add-partner'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                    >
+                      <View style={styles.partnerCircleAdd}>
+                        <Text style={styles.partnerCircleAddText}>+</Text>
+                      </View>
+                      <Text style={styles.partnerCircleName}>Add</Text>
+                    </Pressable>
+                  )}
+                </ScrollView>
+
                 <View style={styles.petsRow}>
                   <View style={styles.petSlot}>
                     <View style={styles.petPortraitWrap}>
@@ -957,6 +1146,18 @@ export default function GroupScreen() {
                       <Text style={styles.petSlotSub}>@{partner.username}</Text>
                     ) : null}
                   </View>
+                </View>
+
+                <View style={styles.streakRow}>
+                  {partnershipStreak > 0 ? (
+                    <>
+                      <Text style={styles.streakFlame}>🔥</Text>
+                      <Text style={styles.streakCount}>{partnershipStreak}</Text>
+                      <Text style={styles.streakLabel}>{t('group.active.streakDays')}</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.streakEmpty}>{t('group.active.streakEmpty')}</Text>
+                  )}
                 </View>
 
                 <View style={styles.card}>
@@ -1040,36 +1241,46 @@ export default function GroupScreen() {
                             <View style={styles.photoColumns}>
                               <View style={styles.photoColumn}>
                                 {myDay.map((ph) => (
-                                  <Pressable key={ph.id} style={styles.photoItem} onPress={() => openGallery(myPhotos, ph)}>
-                                    <Image source={{ uri: ph.url }} style={styles.photoThumb} />
-                                    {ph.nutrients && ph.nutrients.length > 0 && (
-                                      <View style={styles.photoNutrients}>
-                                        {ph.nutrients.slice(0, 5).map((n) => (
-                                          <Text key={n} style={styles.photoNutrientEmoji}>
-                                            {ITEM_TYPE_EMOJI[n] ?? '●'}
-                                          </Text>
-                                        ))}
-                                      </View>
-                                    )}
-                                  </Pressable>
+                                  <View key={ph.id} style={styles.photoItemWrapper}>
+                                    <Text style={styles.photoTime}>
+                                      {new Date(ph.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </Text>
+                                    <Pressable style={styles.photoItem} onPress={() => openGallery(myPhotos, ph)}>
+                                      <Image source={{ uri: ph.url }} style={styles.photoThumb} />
+                                      {ph.nutrients && ph.nutrients.length > 0 && (
+                                        <View style={styles.photoNutrients}>
+                                          {ph.nutrients.slice(0, 5).map((n) => (
+                                            <Text key={n} style={styles.photoNutrientEmoji}>
+                                              {ITEM_TYPE_EMOJI[n] ?? '●'}
+                                            </Text>
+                                          ))}
+                                        </View>
+                                      )}
+                                    </Pressable>
+                                  </View>
                                 ))}
                                 {myDay.length === 0 && <Text style={styles.photoEmpty}>—</Text>}
                               </View>
                               <View style={styles.photoColumnDivider} />
                               <View style={styles.photoColumn}>
                                 {ptDay.map((ph) => (
-                                  <Pressable key={ph.id} style={styles.photoItem} onPress={() => openGallery(partnerPhotos, ph)}>
-                                    <Image source={{ uri: ph.url }} style={styles.photoThumb} />
-                                    {ph.nutrients && ph.nutrients.length > 0 && (
-                                      <View style={styles.photoNutrients}>
-                                        {ph.nutrients.slice(0, 5).map((n) => (
-                                          <Text key={n} style={styles.photoNutrientEmoji}>
-                                            {ITEM_TYPE_EMOJI[n] ?? '●'}
-                                          </Text>
-                                        ))}
-                                      </View>
-                                    )}
-                                  </Pressable>
+                                  <View key={ph.id} style={styles.photoItemWrapper}>
+                                    <Text style={styles.photoTime}>
+                                      {new Date(ph.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </Text>
+                                    <Pressable style={styles.photoItem} onPress={() => openGallery(partnerPhotos, ph)}>
+                                      <Image source={{ uri: ph.url }} style={styles.photoThumb} />
+                                      {ph.nutrients && ph.nutrients.length > 0 && (
+                                        <View style={styles.photoNutrients}>
+                                          {ph.nutrients.slice(0, 5).map((n) => (
+                                            <Text key={n} style={styles.photoNutrientEmoji}>
+                                              {ITEM_TYPE_EMOJI[n] ?? '●'}
+                                            </Text>
+                                          ))}
+                                        </View>
+                                      )}
+                                    </Pressable>
+                                  </View>
                                 ))}
                                 {ptDay.length === 0 && <Text style={styles.photoEmpty}>—</Text>}
                               </View>
@@ -1111,7 +1322,7 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    backgroundColor: 'rgba(211, 211, 211)',
     justifyContent: 'center', alignItems: 'center',
   },
   title: { fontSize: 22, fontWeight: '700', color: Colors.darkBrown, textAlign: 'center' },
@@ -1330,6 +1541,8 @@ const styles = StyleSheet.create({
     textAlign: 'center', paddingVertical: 6,
   },
   photoColumnDivider: { width: 1, backgroundColor: Colors.lightGray },
+  photoItemWrapper: { gap: 2 },
+  photoTime: { fontSize: 11, color: Colors.gray, textAlign: 'center' },
   photoItem: { gap: 4 },
   photoThumb: {
     width: '100%',
@@ -1340,6 +1553,11 @@ const styles = StyleSheet.create({
   photoNutrients: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 2 },
   photoNutrientEmoji: { fontSize: 12 },
   photoEmpty: { fontSize: 13, color: Colors.gray, textAlign: 'center', paddingVertical: 8 },
+  streakRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 4 },
+  streakFlame: { fontSize: 20 },
+  streakCount: { fontSize: 22, fontWeight: '800', color: Colors.brown },
+  streakLabel: { fontSize: 14, color: Colors.brown, fontWeight: '500' },
+  streakEmpty: { fontSize: 13, color: Colors.gray, textAlign: 'center' },
   // Meals day sections
   mealsDaySection: { marginTop: 14 },
   mealsDayHeader: {
@@ -1354,4 +1572,26 @@ const styles = StyleSheet.create({
   usernameAvailable: { fontSize: 13, fontWeight: '600', color: '#4CAF50', marginTop: 6 },
   usernameTaken: { fontSize: 13, fontWeight: '600', color: '#E53935', marginTop: 6 },
   usernameHint: { fontSize: 12, color: Colors.gray, marginTop: 6, lineHeight: 18 },
+
+  // Partner selector circles (active state row + add-partner screen)
+  partnerRowScroll: { marginBottom: 16 },
+  partnerRowContent: { flexDirection: 'row', gap: 12, paddingHorizontal: 4 },
+  partnerCircleWrap: { alignItems: 'center', width: 72 },
+  partnerCirclePortrait: {
+    width: 60, height: 60, borderRadius: 30, overflow: 'hidden',
+    borderWidth: 2, borderColor: Colors.beige,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+  },
+  partnerCircleSelected: { borderColor: Colors.softOrange, borderWidth: 3 },
+  partnerCircleImg: { width: 60, height: 60 },
+  partnerCircleName: { fontSize: 11, fontWeight: '700', color: Colors.darkBrown, marginTop: 4, textAlign: 'center' },
+  partnerCircleSub: { fontSize: 10, color: Colors.gray, textAlign: 'center' },
+  partnerCircleAdd: {
+    width: 60, height: 60, borderRadius: 30,
+    borderWidth: 2, borderColor: Colors.softOrange,
+    borderStyle: 'dashed' as const,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.6)',
+  },
+  partnerCircleAddText: { fontSize: 28, color: Colors.softOrange, lineHeight: 32 },
 });

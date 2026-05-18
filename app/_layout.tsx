@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { LogBox, View } from "react-native";
@@ -75,7 +75,44 @@ function RootLayoutNav() {
   );
 }
 
+// Lazy-load expo-notifications so the web build doesn't hard-depend on it.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let Notifications: Record<string, any> | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Notifications = require('expo-notifications');
+} catch { /* web */ }
+
+function isGroupNotification(response: { notification: { request: { content: { data?: Record<string, unknown> } } } } | null): boolean {
+  return response?.notification?.request?.content?.data?.screen === 'group';
+}
+
 export default function RootLayout() {
+  // Navigate to /group when a "partner shared a photo" push notification is tapped.
+  // Handles both background→foreground taps and cold-start (app was killed).
+  useEffect(() => {
+    if (!Notifications) return;
+
+    // Cold-start: app was opened by tapping a notification while killed.
+    Notifications.getLastNotificationResponseAsync().then(
+      (response: { notification: { request: { content: { data?: Record<string, unknown> } } } } | null) => {
+        if (isGroupNotification(response)) {
+          router.navigate('/group');
+        }
+      }
+    );
+
+    // Background/foreground: app already running when notification is tapped.
+    const sub = Notifications.addNotificationResponseReceivedListener(
+      (response: { notification: { request: { content: { data?: Record<string, unknown> } } } }) => {
+        if (isGroupNotification(response)) {
+          router.navigate('/group');
+        }
+      },
+    );
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     initializeI18n()
       .catch((e) => console.error('[i18n] init error:', e))
