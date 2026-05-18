@@ -50,6 +50,8 @@ import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 
 type Screen = 'loading' | 'no-username' | 'none' | 'add-partner' | 'found' | 'goal-select' | 'pending-outgoing' | 'active';
 
+type PartnerPhotoPage = { mine: PetPhoto[]; partner: PetPhoto[]; hasMore: boolean };
+
 interface FoundUser {
   userId: string;
   username: string;
@@ -286,9 +288,9 @@ export default function GroupScreen() {
     staleTime: 60_000,
   });
 
-  // Partnership photos — cached per partnership, stale after 60 s.
+  // Partnership photos — first page via React Query, extra pages appended manually.
   const {
-    data: photosData,
+    data: firstPhotosPage,
     refetch: refetchPhotos,
   } = useQuery({
     queryKey: ['partnershipPhotos', activePartnership?.id, userId],
@@ -296,15 +298,60 @@ export default function GroupScreen() {
       userId!,
       activePartnership!.partner.userId,
       activePartnership!.createdAt,
-      100,
+      5,
     ),
     enabled: !!activePartnership && !!userId,
     staleTime: 60_000,
     gcTime: 24 * 60 * 60 * 1000,
   });
 
-  const myPhotos = photosData?.mine ?? [];
-  const partnerPhotos = photosData?.partner ?? [];
+  const [extraMine, setExtraMine] = useState<PetPhoto[]>([]);
+  const [extraPartner, setExtraPartner] = useState<PetPhoto[]>([]);
+  const [hasMorePhotos, setHasMorePhotos] = useState(false);
+  const [isFetchingMorePhotos, setIsFetchingMorePhotos] = useState(false);
+
+  // Reset extra pages when partnership changes or first page refreshes.
+  useEffect(() => {
+    setExtraMine([]);
+    setExtraPartner([]);
+    setHasMorePhotos(firstPhotosPage?.hasMore ?? false);
+  }, [activePartnership?.id, firstPhotosPage]);
+
+  const fetchNextPhotos = useCallback(async () => {
+    if (!activePartnership || !userId || isFetchingMorePhotos || !hasMorePhotos) return;
+    const allMine = [...(firstPhotosPage?.mine ?? []), ...extraMine];
+    const allPartner = [...(firstPhotosPage?.partner ?? []), ...extraPartner];
+    const all = [...allMine, ...allPartner];
+    if (!all.length) return;
+    const cursor = all.reduce(
+      (oldest, p) => (p.created_at < oldest ? p.created_at : oldest),
+      all[0].created_at,
+    );
+    setIsFetchingMorePhotos(true);
+    try {
+      const more = await getPartnershipPhotos(
+        userId,
+        activePartnership.partner.userId,
+        activePartnership.createdAt,
+        5,
+        cursor,
+      );
+      setExtraMine((prev) => [...prev, ...more.mine]);
+      setExtraPartner((prev) => [...prev, ...more.partner]);
+      setHasMorePhotos(more.hasMore);
+    } finally {
+      setIsFetchingMorePhotos(false);
+    }
+  }, [activePartnership, userId, firstPhotosPage, extraMine, extraPartner, isFetchingMorePhotos, hasMorePhotos]);
+
+  const myPhotos = useMemo(
+    () => [...(firstPhotosPage?.mine ?? []), ...extraMine],
+    [firstPhotosPage, extraMine],
+  );
+  const partnerPhotos = useMemo(
+    () => [...(firstPhotosPage?.partner ?? []), ...extraPartner],
+    [firstPhotosPage, extraPartner],
+  );
 
   // Derived screen — local overrides (found / goal-select / add-partner) take precedence.
   const screen: Screen = useMemo(() => {
@@ -566,7 +613,7 @@ export default function GroupScreen() {
     <View style={styles.container}>
       <LinearGradient colors={['#FFF8F0', '#FAF0E6', '#F5E6D3']} style={StyleSheet.absoluteFill} />
 
-      <View style={[styles.safeContent, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }]}>
+      <View style={[styles.safeContent, { paddingTop: insets.top + 12 }]}>
         {/* Header */}
         <View style={styles.header}>
           <Pressable
@@ -590,10 +637,19 @@ export default function GroupScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 12 }]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.brown} />
           }
+          onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
+            if (
+              layoutMeasurement.height + contentOffset.y >= contentSize.height - 300 &&
+              hasMorePhotos && !isFetchingMorePhotos
+            ) {
+              fetchNextPhotos();
+            }
+          }}
+          scrollEventThrottle={400}
         >
 
           {/* ── No username — prompt to set handle ──────────────────── */}
@@ -1576,14 +1632,15 @@ const styles = StyleSheet.create({
   // Partner selector circles (active state row + add-partner screen)
   partnerRowScroll: { marginBottom: 16 },
   partnerRowContent: { flexDirection: 'row', gap: 12, paddingHorizontal: 4 },
-  partnerCircleWrap: { alignItems: 'center', width: 72 },
+  partnerCircleWrap: { alignItems: 'center', width: 83 },
   partnerCirclePortrait: {
-    width: 60, height: 60, borderRadius: 30, overflow: 'hidden',
+    width: 70, height: 70, borderRadius: 35, overflow: 'hidden',
     borderWidth: 2, borderColor: Colors.beige,
     backgroundColor: 'rgba(255,255,255,0.85)',
+    alignItems: 'center', justifyContent: 'center',
   },
   partnerCircleSelected: { borderColor: Colors.softOrange, borderWidth: 3 },
-  partnerCircleImg: { width: 60, height: 60 },
+  partnerCircleImg: { width: 70, height: 70 },
   partnerCircleName: { fontSize: 11, fontWeight: '700', color: Colors.darkBrown, marginTop: 4, textAlign: 'center' },
   partnerCircleSub: { fontSize: 10, color: Colors.gray, textAlign: 'center' },
   partnerCircleAdd: {

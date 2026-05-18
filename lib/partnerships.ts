@@ -321,6 +321,11 @@ export async function sendInvite(
   if (error?.code === 'P0001') return `You already have ${MAX_PARTNERS} pending invites. Cancel one first.`;
   if (error?.code === '23505') return 'You already have a pending invite to this person.';
   if (error) return error.message;
+
+  // Fire-and-forget — push notification failure must not block the invite.
+  s.functions.invoke('notify-partner-invite', { body: { to_user_id: toUserId } })
+    .catch(() => {});
+
   return null;
 }
 

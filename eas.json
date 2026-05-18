@@ -3,6 +3,14 @@
     "version": ">= 18.1.0",
     "appVersionSource": "remote"
   },
+  "submit": {
+  "production": {
+    "ios": {
+      "appleId": "s.w@berkeley.edu",
+      "ascAppId": "6760537896"
+    }
+  }
+},
   "build": {
     "development": {
       "developmentClient": true,

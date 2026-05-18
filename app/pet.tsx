@@ -71,7 +71,7 @@ import {
   getDailyCalorieDirection,
 } from '@/lib/onboarding-storage';
 import { fetchAllUserStreakDates, computeStreakLengthFromDates } from '@/lib/user-streak';
-import { getMyPartnership, getPartnershipStreak } from '@/lib/partnerships';
+import { getMyPartnership, getPartnershipStreak, getMyPendingInvites } from '@/lib/partnerships';
 
 const IS_DEV = Constants.expoConfig?.extra?.IS_DEV === true;
 
@@ -301,6 +301,14 @@ export default function PetScreen() {
     enabled: !!petPagePartnership?.id,
     staleTime: 60_000,
   });
+
+  const { data: pendingInvites = [] } = useQuery({
+    queryKey: ['pendingInvites', userId],
+    queryFn: () => getMyPendingInvites(userId!),
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+  const incomingInviteCount = pendingInvites.filter((i) => i.direction === 'incoming').length;
 
   useEffect(() => {
     if (!showUsernamePrompt) return;
@@ -775,7 +783,7 @@ export default function PetScreen() {
 
   return (
     <View style={styles.container} {...edgePanResponder.panHandlers}>
-      {(personalStreak > 0 || partnershipStreak > 0) && (
+      {(personalStreak > 0 || partnershipStreak > 0 || incomingInviteCount > 0) && (
         <View style={styles.streakSidebar} pointerEvents="box-none">
           {personalStreak > 0 && (
             <Pressable style={styles.streakPill} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push('/streak'); }}>
@@ -787,6 +795,12 @@ export default function PetScreen() {
             <Pressable style={styles.streakPill} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.navigate('/group'); }}>
               <Text style={styles.streakPillEmoji}>🤝</Text>
               <Text style={styles.streakPillCount}>{partnershipStreak}</Text>
+            </Pressable>
+          )}
+          {incomingInviteCount > 0 && (
+            <Pressable style={[styles.streakPill, styles.invitePill]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.navigate('/group'); }}>
+              <Text style={styles.streakPillEmoji}>💌</Text>
+              <Text style={styles.streakPillCount}>{incomingInviteCount}</Text>
             </Pressable>
           )}
         </View>
@@ -2116,6 +2130,9 @@ const styles = StyleSheet.create({
     fontWeight: '800' as const,
     color: Colors.darkBrown,
     marginTop: 2,
+  },
+  invitePill: {
+    backgroundColor: 'rgba(255, 235, 240, 0.92)',
   },
   usernameModalCard: {
     width: '86%',

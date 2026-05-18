@@ -12,7 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, LayoutGrid, List, Trash2 } from 'lucide-react-native';
@@ -21,7 +21,7 @@ import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { usePet } from '@/providers/PetProvider';
-import { getPetPhotos, deletePetPhoto, type PetPhoto } from '@/lib/supabase-photos';
+import { getPetPhotosPage, deletePetPhoto, type PetPhoto } from '@/lib/supabase-photos';
 import { getAlbumPhotos } from '@/lib/photo-album';
 import { getItemTypeDisplay } from '@/constants/badge-types';
 
@@ -35,6 +35,7 @@ const SIZE = (SCREEN_WIDTH - 40 - GAP * (COLS - 1)) / COLS;
 const blurhash = 'L6PZfSi_.AyE_3t7t7R**0o#DgR4';
 
 type AlbumViewMode = 'list' | 'grid';
+type AlbumPhotoPage = { photos: PetPhoto[]; hasMore: boolean };
 
 function photoKey(p: PetPhoto): string {
   return `${p.id}-${p.url}`;
@@ -135,6 +136,41 @@ export default function AlbumScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const queryClient = useQueryClient();
 
+  const {
+    data: photosPages,
+    isLoading,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery<AlbumPhotoPage, Error, InfiniteData<AlbumPhotoPage>, readonly ['albumPhotos', string | undefined], string | undefined>({
+    queryKey: ['albumPhotos', userId ?? undefined] as const,
+    queryFn: async ({ pageParam }): Promise<AlbumPhotoPage> => {
+      if (hasSupabaseConfig() && userId) {
+        return getPetPhotosPage(userId, 10, pageParam);
+      }
+      const assets = await getAlbumPhotos();
+      return {
+        photos: assets.map((a) => ({
+          id: 0, user_id: '', pet_id: 0, storage_path: '',
+          created_at: a.creationTime?.toString() ?? '',
+          nutrients: null, calories: null, url: a.uri,
+        })),
+        hasMore: false,
+      };
+    },
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore ? lastPage.photos[lastPage.photos.length - 1]?.created_at : undefined,
+    initialPageParam: undefined,
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
+
+  const photos = useMemo(
+    () => photosPages?.pages.flatMap((p) => p.photos) ?? [],
+    [photosPages],
+  );
+
   const handleDelete = useCallback(
     (photo: PetPhoto) => {
       Alert.alert('Delete photo?', 'This cannot be undone.', [
@@ -143,9 +179,15 @@ export default function AlbumScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            queryClient.setQueryData<PetPhoto[]>(
-              ['albumPhotos', userId],
-              (prev) => prev?.filter((p) => p.id !== photo.id) ?? [],
+            queryClient.setQueryData<InfiniteData<AlbumPhotoPage>>(
+              ['albumPhotos', userId ?? undefined],
+              (prev) => prev ? {
+                ...prev,
+                pages: prev.pages.map((page) => ({
+                  ...page,
+                  photos: page.photos.filter((p: PetPhoto) => p.id !== photo.id),
+                })),
+              } : prev,
             );
             try {
               await deletePetPhoto(photo.id, photo.storage_path);
@@ -159,27 +201,6 @@ export default function AlbumScreen() {
     [userId, queryClient, refetch],
   );
 
-  const { data: photos = [], isLoading, refetch } = useQuery({
-    queryKey: ['albumPhotos', userId],
-    queryFn: async (): Promise<PetPhoto[]> => {
-      if (hasSupabaseConfig() && userId) {
-        return getPetPhotos(userId);
-      }
-      const assets = await getAlbumPhotos();
-      return assets.map((a) => ({
-        id: 0,
-        user_id: '',
-        pet_id: 0,
-        storage_path: '',
-        created_at: a.creationTime?.toString() ?? '',
-        nutrients: null,
-        calories: null,
-        url: a.uri,
-      }));
-    },
-    staleTime: 60 * 1000,
-  });
-
   const openGallery = useCallback(
     (photo: PetPhoto) => {
       const i = photos.findIndex((p) => photoKey(p) === photoKey(photo));
@@ -191,6 +212,10 @@ export default function AlbumScreen() {
   const sections = useMemo(() => groupPhotosByDay(photos, t), [photos, t]);
 
   useFocusEffect(useCallback(() => { refetch(); }, [refetch]));
+
+  const handleLoadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -313,6 +338,8 @@ export default function AlbumScreen() {
             SectionSeparatorComponent={() => <View style={styles.sectionSpacer} />}
             refreshControl={refreshControl}
             initialNumToRender={12}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.3}
           />
         ) : (
           <FlatList
@@ -326,6 +353,8 @@ export default function AlbumScreen() {
             windowSize={5}
             removeClippedSubviews
             refreshControl={refreshControl}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.3}
             renderItem={({ item }) => (
               <Pressable style={styles.photoWrap} onPress={() => openGallery(item)}>
                 <Image

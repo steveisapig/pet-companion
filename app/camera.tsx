@@ -936,9 +936,7 @@ export default function CameraScreen() {
             );
             uploadedPhotoIdRef.current = uploaded.id;
             cloudUploadDone = true;
-            queryClient.setQueryData<import('@/lib/supabase-photos').PetPhoto[]>(
-              ['albumPhotos', userId], (prev) => [uploaded, ...(prev ?? [])],
-            );
+            queryClient.invalidateQueries({ queryKey: ['albumPhotos', userId] });
             const pendingCalorie = parseInt(displayCalorieRef.current, 10);
             if (!isNaN(pendingCalorie) && pendingCalorie !== bgCalorie) {
               await updatePetPhotoCalories(uploaded.id, pendingCalorie)
@@ -998,23 +996,27 @@ export default function CameraScreen() {
             useNativeDriver: true,
           }).start(() => res())
         );
-        const [, { outlined, cropped, blurred, contours }] = await Promise.all([
+        const [, { cropped, blurred, contours }] = await Promise.all([
           scanDone,
           (async () => {
             try { uploadUri = await applyImageEdits(capturedUri, editDeg, editBox, editNatural); }
             catch (e) { console.error('[Camera] apply edits (scanner):', e); }
-            const [outl, crop, blurred, contours] = await Promise.all([
-              applyFoodOutline(uploadUri),
+            const [crop, blr, contrs] = await Promise.all([
               cropFood(uploadUri),
               blurBackground(uploadUri),
               getContourPaths(uploadUri),
             ]);
-            return { outlined: outl, cropped: crop, blurred, contours };
+            return { cropped: crop, blurred: blr, contours: contrs };
           })(),
         ]);
 
+        // Apply white border to the blurred-background composite
+        const blurredBase = blurred !== uploadUri ? blurred : uploadUri;
+        const outlined = await applyFoodOutline(blurredBase);
+        const saveUri = outlined !== blurredBase ? outlined : blurredBase;
+
         // Step 2: draw white outline (~650ms — allows stroke animation to complete)
-        setOutlineUri(outlined);
+        setOutlineUri(saveUri);
         setCroppedOverlayUri(cropped);
         setContourResult(contours.paths.length > 0 ? contours : null);
         setScanPhase('outline');
@@ -1071,8 +1073,6 @@ export default function CameraScreen() {
         );
 
         setScanPhase(null);
-        // Show the blurred-background composite on the success screen
-        const saveUri = blurred !== uploadUri ? blurred : uploadUri;
         setSavePreviewUri(null);
         setDisplayUri(saveUri);
 
@@ -1097,11 +1097,13 @@ export default function CameraScreen() {
         }
         setDisplayUri(uploadUri);
         analysisUri = uploadUri;
-        applyFoodOutline(uploadUri).then(outlined => {
-          if (outlined !== uploadUri) setDisplayUri(outlined);
-        });
 
-        const { nutrients, calorie, healthScore, reason } = await doAnalysis(analysisUri);
+        const [{ nutrients, calorie, healthScore, reason }, outlinedUri] = await Promise.all([
+          doAnalysis(analysisUri),
+          applyFoodOutline(uploadUri),
+        ]);
+        const finalUri = outlinedUri !== uploadUri ? outlinedUri : uploadUri;
+        setDisplayUri(finalUri);
         setAnalysisResult({ calories: calorie, nutrients, healthScore, reason });
         setDisplayCalorieStr(String(calorie));
         displayCalorieRef.current = String(calorie);
@@ -1109,7 +1111,7 @@ export default function CameraScreen() {
         loveModeRef.current = healthScore > 8;
         setPhase('success');
         startSuccessAnimations();
-        doBgUpload(uploadUri, nutrients, calorie);
+        doBgUpload(finalUri, nutrients, calorie);
       }
     } catch (e) {
       console.error('[Camera] Analysis error:', e);

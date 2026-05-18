@@ -346,29 +346,37 @@ export async function getPetPhotosForLocalCalendarDay(
  * @param myUserId      The calling user's ID
  * @param partnerUserId The partner's user ID
  * @param sinceIso      ISO timestamp — only photos at or after this time are returned
- * @param limit         Max photos per user (default 50)
+ * @param limit         Max photos per user per page (default 5)
+ * @param beforeIso     Cursor — only photos strictly older than this timestamp (for pagination)
  */
 export async function getPartnershipPhotos(
   myUserId: string,
   partnerUserId: string,
   sinceIso: string,
-  limit = 50,
-): Promise<{ mine: PetPhoto[]; partner: PetPhoto[] }> {
-  const { data, error } = await supabaseClient
+  limit = 5,
+  beforeIso?: string,
+): Promise<{ mine: PetPhoto[]; partner: PetPhoto[]; hasMore: boolean }> {
+  let query = supabaseClient
     .from('pet_photos')
     .select('*')
     .in('user_id', [myUserId, partnerUserId])
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
-    .limit(limit * 2); // fetch up to limit per user; we'll split client-side
+    .limit((limit + 1) * 2);
+
+  if (beforeIso) {
+    query = query.lt('created_at', beforeIso);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     dbLog('SELECT', 'pet_photos', {
-      params: { myUserId, partnerUserId, sinceIso },
+      params: { myUserId, partnerUserId, sinceIso, beforeIso },
       error,
       message: `getPartnershipPhotos failed: ${error.message}`,
     });
-    return { mine: [], partner: [] };
+    return { mine: [], partner: [], hasMore: false };
   }
 
   const rows = (data ?? []) as {
@@ -391,14 +399,78 @@ export async function getPartnershipPhotos(
     };
   };
 
-  const mine: PetPhoto[] = [];
-  const partner: PetPhoto[] = [];
+  const mineAll: PetPhoto[] = [];
+  const partnerAll: PetPhoto[] = [];
   for (const row of rows) {
-    if (row.user_id === myUserId) mine.push(toPhoto(row));
-    else partner.push(toPhoto(row));
+    if (row.user_id === myUserId) mineAll.push(toPhoto(row));
+    else partnerAll.push(toPhoto(row));
   }
 
-  return { mine: mine.slice(0, limit), partner: partner.slice(0, limit) };
+  const hasMore = mineAll.length > limit || partnerAll.length > limit;
+  return {
+    mine: mineAll.slice(0, limit),
+    partner: partnerAll.slice(0, limit),
+    hasMore,
+  };
+}
+
+/**
+ * Paginated fetch of a user's photos, newest-first.
+ * Pass `beforeIso` (the `created_at` of the last fetched row) to get the next page.
+ * Returns one extra row to detect whether more pages exist.
+ */
+export async function getPetPhotosPage(
+  userId: string,
+  limit: number,
+  beforeIso?: string,
+): Promise<{ photos: PetPhoto[]; hasMore: boolean }> {
+  let query = supabaseClient
+    .from('pet_photos')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(limit + 1);
+
+  if (beforeIso) {
+    query = query.lt('created_at', beforeIso);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    dbLog('SELECT', 'pet_photos', {
+      params: { userId, beforeIso },
+      error,
+      message: `getPetPhotosPage failed: ${error.message}`,
+    });
+    return { photos: [], hasMore: false };
+  }
+
+  const rows = (data ?? []) as {
+    id: number;
+    user_id: string;
+    pet_id: number;
+    storage_path: string;
+    created_at: string;
+    nutrients?: number[] | null;
+    calories?: number | null;
+  }[];
+
+  const hasMore = rows.length > limit;
+  const pageRows = rows.slice(0, limit);
+
+  const photos: PetPhoto[] = pageRows.map((row) => {
+    const { data: urlData } = supabaseClient.storage.from(BUCKET).getPublicUrl(row.storage_path);
+    return {
+      ...row,
+      nutrients: row.nutrients ?? null,
+      calories: row.calories ?? null,
+      url: urlData?.publicUrl ?? '',
+    };
+  });
+
+  return { photos, hasMore };
 }
 
 /**
