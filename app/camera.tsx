@@ -709,15 +709,25 @@ export default function CameraScreen() {
   useEffect(() => {
     if (!demo) return;
     const ALL_NUTRIENTS = ['protein', 'fiber', 'vitamin-c', 'calcium', 'iron', 'vitamin-d', 'omega-3'];
-    const healthScore = Math.floor(Math.random() * 10) + 1;
-    const calories    = Math.floor(Math.random() * 800) + 100;
-    const nutrients   = ALL_NUTRIENTS.filter(() => Math.random() < 0.45);
-    const data = { healthScore, calories, nutrients, reason: '' };
-    setAnalysisResult(data);
-    setDisplayCalorieStr(String(calories));
-    displayCalorieRef.current = String(calories);
-    originalCalorieRef.current = calories;
-    loveModeRef.current = healthScore > 8;
+
+    if (demo === 'meal_card') {
+      const uri = Image.resolveAssetSource(require('@/assets/images/adaptive-icon.png')).uri;
+      setDisplayUri(uri);
+      setAnalysisResult({ healthScore: 9, calories: 420, nutrients: ALL_NUTRIENTS.slice(0, 4), reason: 'Looks delicious and nutritious!' });
+      setDisplayCalorieStr('420');
+      displayCalorieRef.current = '420';
+      originalCalorieRef.current = 420;
+      loveModeRef.current = true;
+    } else {
+      const healthScore = Math.floor(Math.random() * 10) + 1;
+      const calories    = Math.floor(Math.random() * 800) + 100;
+      const nutrients   = ALL_NUTRIENTS.filter(() => Math.random() < 0.45);
+      setAnalysisResult({ healthScore, calories, nutrients, reason: '' });
+      setDisplayCalorieStr(String(calories));
+      displayCalorieRef.current = String(calories);
+      originalCalorieRef.current = calories;
+      loveModeRef.current = healthScore > 8;
+    }
     setPhase('success');
   // startSuccessAnimations runs via the phase useEffect; no need to call it here
   // eslint-disable-next-line react-hooks/exhaustive-deps

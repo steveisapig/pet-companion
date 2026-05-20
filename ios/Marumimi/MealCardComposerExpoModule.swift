@@ -17,26 +17,19 @@ public final class MealCardComposerExpoModule: Module {
     public func definition() -> ModuleDefinition {
         Name("MealCardComposer")
 
-        AsyncFunction("compose") { (options: ComposeOptions, promise: Promise) in
+        let gen = generator  // capture actor reference directly — avoids non-Sendable self capture
+
+        AsyncFunction("compose") { (options: ComposeOptions) async throws -> String in
             guard !options.foodUri.isEmpty,
                   let food = Self.loadImage(from: options.foodUri) else {
-                promise.reject("load_error", "Cannot load food image")
-                return
+                throw NSError(domain: "MealCardComposer", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Cannot load food image"])
             }
 
             let petImage = options.petImageUri.isEmpty ? nil : Self.loadImage(from: options.petImageUri)
             let petColor = Self.color(fromHex: options.petColor)
-
-            var canvasWidth: CGFloat = 390
-            var canvasScale: CGFloat = 3
-            if Thread.isMainThread {
-                canvasWidth = UIScreen.main.bounds.width
-                canvasScale = UIScreen.main.scale
-            } else {
-                DispatchQueue.main.sync {
-                    canvasWidth = UIScreen.main.bounds.width
-                    canvasScale = UIScreen.main.scale
-                }
+            let (canvasWidth, canvasScale): (CGFloat, CGFloat) = await MainActor.run {
+                (UIScreen.main.bounds.width, UIScreen.main.scale)
             }
 
             let renderOptions = MealCardRenderOptions(
@@ -51,20 +44,15 @@ public final class MealCardComposerExpoModule: Module {
                 canvasScale: canvasScale
             )
 
-            Task {
-                guard let card = await generator.generateMealCard(options: renderOptions),
-                      let jpeg = card.jpegData(compressionQuality: 0.92) else {
-                    promise.reject("encode_error", "Image generation failed")
-                    return
-                }
-                let fpath = NSTemporaryDirectory() + "meal_card_\(UUID().uuidString).jpg"
-                do {
-                    try jpeg.write(to: URL(fileURLWithPath: fpath))
-                    promise.resolve("file://\(fpath)")
-                } catch {
-                    promise.reject("write_error", error.localizedDescription)
-                }
+            guard let card = await gen.generateMealCard(options: renderOptions),
+                  let jpeg = card.jpegData(compressionQuality: 0.92) else {
+                throw NSError(domain: "MealCardComposer", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey: "Image generation failed"])
             }
+
+            let fpath = NSTemporaryDirectory() + "meal_card_\(UUID().uuidString).jpg"
+            try jpeg.write(to: URL(fileURLWithPath: fpath))
+            return "file://\(fpath)"
         }
     }
 

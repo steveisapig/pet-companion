@@ -177,6 +177,7 @@
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
 				6AB8E5CAD81B8AE62E9BD1AA /* [Expo] Configure project */,
+				BB9D2F1D9169412998EB1620 /* [Custom] Inject MealCardComposerExpoModule */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
@@ -302,7 +303,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Marumimi/expo-configure-project.sh\"\nbash \"$PROJECT_DIR/../plugins/inject-expo-modules-provider.sh\" \"$PROJECT_DIR/Pods/Target Support Files/Pods-Marumimi/ExpoModulesProvider.swift\"\n";
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Marumimi/expo-configure-project.sh\"\n";
+		};
+		BB9D2F1D9169412998EB1620 /* [Custom] Inject MealCardComposerExpoModule */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Pods/Target Support Files/Pods-Marumimi/ExpoModulesProvider.swift",
+			);
+			name = "[Custom] Inject MealCardComposerExpoModule";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bash \"$PROJECT_DIR/../plugins/inject-expo-modules-provider.sh\" \"$PROJECT_DIR/Pods/Target Support Files/Pods-Marumimi/ExpoModulesProvider.swift\"\n";
 		};
 		6D1ECEF11A9625A8144FA7DA /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;

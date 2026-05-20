@@ -80,6 +80,7 @@ const DEV_SCENARIOS: { label: string; demo: string }[] = [
   { label: '😊  Success: Liked a lot (8/10)',  demo: 'liked_alot' },
   { label: '🙂  Success: Liked (5/10)',         demo: 'liked' },
   { label: '😐  Success: Disliked (2/10)',      demo: 'disliked' },
+  { label: '🍱  Meal card (adaptive icon)',     demo: 'meal_card' },
 ];
 
 const hasSupabaseConfig = () =>

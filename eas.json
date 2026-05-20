@@ -26,7 +26,10 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "IS_DEV": "0"
+      }
     }
   }
 }

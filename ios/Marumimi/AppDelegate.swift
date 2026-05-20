@@ -29,16 +29,6 @@ public class AppDelegate: ExpoAppDelegate {
       launchOptions: launchOptions)
 #endif
 
-    // Debug: print all registered RN modules once JS loads
-    NotificationCenter.default.addObserver(
-      forName: Notification.Name("RCTJavaScriptDidLoadNotification"),
-      object: nil, queue: .main
-    ) { note in
-      if let bridge = note.object as? RCTBridge {
-        NSLog("[RN Modules] %@", bridge.moduleClasses.map { "\($0)" }.joined(separator: ", "))
-      }
-    }
-
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 

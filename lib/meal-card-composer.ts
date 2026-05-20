@@ -4,6 +4,9 @@ import { getNutrientDisplay } from '@/constants/badge-types';
 import type { PetType } from '@/constants/pets';
 
 const NativeMealCardComposer = requireOptionalNativeModule('MealCardComposer');
+if (__DEV__) {
+  console.log('[MealCard] module:', NativeMealCardComposer ? 'found' : 'null', '| keys:', NativeMealCardComposer ? Object.keys(NativeMealCardComposer as any) : []);
+}
 
 const PET_IMAGES: Record<PetType, ReturnType<typeof require>> = {
   mochi:  require('@/assets/images/pet-mochi.png'),
@@ -28,7 +31,9 @@ export async function composeMealCard(opts: MealCardOptions): Promise<string | n
   }
 
   const petSource = Image.resolveAssetSource(PET_IMAGES[opts.petType] ?? PET_IMAGES.mochi as any);
-  const nutrientEmojis = opts.nutrients.slice(0, 8).map(n => getNutrientDisplay(n).emoji).join(' ');
+  const nutrientPills = opts.nutrients.slice(0, 8)
+    .map(n => { const d = getNutrientDisplay(n); return `${d.emoji} ${d.name}`; })
+    .join(',');
 
   try {
     return await NativeMealCardComposer.compose({
@@ -37,7 +42,7 @@ export async function composeMealCard(opts: MealCardOptions): Promise<string | n
       reactionTitle:  opts.reactionTitle,
       reactionReason: opts.reactionReason,
       calories:       opts.calories,
-      nutrients:      nutrientEmojis,
+      nutrients:      nutrientPills,
       petColor:       opts.petColor ?? '#E8985E',
     });
   } catch (e) {
