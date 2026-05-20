@@ -302,7 +302,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Marumimi/expo-configure-project.sh\"\n";
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Marumimi/expo-configure-project.sh\"\nbash \"$PROJECT_DIR/../plugins/inject-expo-modules-provider.sh\" \"$PROJECT_DIR/Pods/Target Support Files/Pods-Marumimi/ExpoModulesProvider.swift\"\n";
 		};
 		6D1ECEF11A9625A8144FA7DA /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
