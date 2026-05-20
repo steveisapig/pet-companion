@@ -1,0 +1,105 @@
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
+require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
+
+require 'json'
+podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
+
+def ccache_enabled?(podfile_properties)
+  # Environment variable takes precedence
+  return ENV['USE_CCACHE'] == '1' if ENV['USE_CCACHE']
+  
+  # Fall back to Podfile properties
+  podfile_properties['apple.ccacheEnabled'] == 'true'
+end
+
+ENV['RCT_NEW_ARCH_ENABLED'] ||= '0' if podfile_properties['newArchEnabled'] == 'false'
+ENV['EX_DEV_CLIENT_NETWORK_INSPECTOR'] ||= podfile_properties['EX_DEV_CLIENT_NETWORK_INSPECTOR']
+ENV['RCT_USE_RN_DEP'] ||= '1' if podfile_properties['ios.buildReactNativeFromSource'] != 'true' && podfile_properties['newArchEnabled'] != 'false'
+ENV['RCT_USE_PREBUILT_RNCORE'] ||= '1' if podfile_properties['ios.buildReactNativeFromSource'] != 'true' && podfile_properties['newArchEnabled'] != 'false'
+platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
+
+prepare_react_native_project!
+
+target 'Marumimi' do
+  use_expo_modules!
+
+  if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
+    config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
+  else
+    config_command = [
+      'node',
+      '--no-warnings',
+      '--eval',
+      'require(\'expo/bin/autolinking\')',
+      'expo-modules-autolinking',
+      'react-native-config',
+      '--json',
+      '--platform',
+      'ios'
+    ]
+  end
+
+  config = use_native_modules!(config_command)
+
+  use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
+  use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :hermes_enabled => podfile_properties['expo.jsEngine'] == nil || podfile_properties['expo.jsEngine'] == 'hermes',
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/..",
+    :privacy_file_aggregation_enabled => podfile_properties['apple.privacyManifestAggregationEnabled'] != 'false',
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      :ccache_enabled => ccache_enabled?(podfile_properties),
+    )
+
+  # ── fmt C++17 fix ─────────────────────────────────────────────────────
+  # FMT_STRING consteval breaks under C++20; fmt only needs C++17.
+  # All other pods (Skia, RN core) must stay on their default standard.
+  installer.pods_project.targets.each do |target|
+    next unless target.name == 'fmt'
+    target.build_configurations.each do |cfg|
+      cfg.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+    end
+  end
+  # ──────────────────────────────────────────────────────────────────────
+
+  # ── Inject app-level Expo modules into ExpoModulesProvider ────────────
+  provider_path = File.join(
+    installer.sandbox.target_support_files_root.to_s,
+    'Pods-Marumimi',
+    'ExpoModulesProvider.swift'
+  )
+  puts "[Custom] ExpoModulesProvider path: #{provider_path}"
+  if File.exist?(provider_path)
+    content = File.read(provider_path)
+    if content.include?('MealCardComposerExpoModule')
+      puts "[Custom] MealCardComposerExpoModule already present, skipping injection"
+    else
+      # Insert before each closing ] inside getModuleClasses() — works regardless of which
+      # module is last in the list. Matches the last .self entry before the closing bracket.
+      injected = content.gsub(/(\s+\w+Module\w*\.self)\n(\s+\])/) do
+        "#{$1},\n      MealCardComposerExpoModule.self\n#{$2}"
+      end
+      if injected == content
+        puts "[Custom] WARNING: could not find injection point in ExpoModulesProvider.swift"
+        puts "[Custom] File preview: #{content[1200, 300]}"
+      else
+        File.write(provider_path, injected)
+        puts "[Custom] MealCardComposerExpoModule injected into ExpoModulesProvider"
+      end
+    end
+  else
+    puts "[Custom] WARNING: ExpoModulesProvider.swift not found at #{provider_path}"
+    puts "[Custom] sandbox root: #{installer.sandbox.target_support_files_root}"
+  end
+  # ──────────────────────────────────────────────────────────────────────
+  end
+end
