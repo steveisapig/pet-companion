@@ -243,7 +243,7 @@ function ZoomableImage({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <TapGestureHandler ref={singleTapRef} numberOfTaps={1} onHandlerStateChange={onSingleTap}>
+    <TapGestureHandler ref={singleTapRef} numberOfTaps={1} waitFor={doubleTapRef} onHandlerStateChange={onSingleTap}>
       <TapGestureHandler
         ref={doubleTapRef}
         numberOfTaps={2}

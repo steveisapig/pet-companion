@@ -11,6 +11,10 @@ const FILES = [
   'NativeCropModule.swift',
   'NativeCropModule.m',
   'CropImageView.swift',
+  'MealCardComposer.swift',
+  'MealCardComposer.m',
+  'MealCardComposerExpoModule.swift',
+  'AppDelegateModules.m',
 ];
 
 // Write source files to ios/Marumimi/ during expo prebuild so EAS Build can find them.
@@ -93,6 +97,9 @@ function withNativeSegmentationXcode(config) {
     return config;
   });
 }
+
+// Modules self-register via RCT_EXPORT_MODULE()+load in their pure Obj-C wrapper classes.
+// No AppDelegate injection needed.
 
 module.exports = function withNativeSegmentation(config) {
   config = withNativeSegmentationSources(config);

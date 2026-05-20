@@ -152,7 +152,7 @@ export async function getMyPartnerships(myUserId: string): Promise<ActivePartner
     .select('id, goal_type, goal_value, calories_direction, created_at')
     .in('id', partnershipIds)
     .eq('status', 1)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: true });
   if (!partnerships?.length) return [];
 
   const activeIds = (partnerships as { id: string }[]).map((p) => p.id);

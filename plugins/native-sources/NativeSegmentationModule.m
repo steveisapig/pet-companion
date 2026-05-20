@@ -1,21 +1,46 @@
 #import <React/RCTBridgeModule.h>
 #import "Marumimi-Swift.h"
 
-@interface NativeSegmentationModule (RCTExternModule) <RCTBridgeModule>
+@interface NativeSegmentationModuleExport : NSObject <RCTBridgeModule>
 @end
 
-@implementation NativeSegmentationModule (RCTExternModule)
-RCT_EXPORT_MODULE()
-RCT_EXTERN_METHOD(applyFoodOutline:(NSString *)imageUri
+@implementation NativeSegmentationModuleExport {
+  NativeSegmentationModule *_impl;
+}
+
+RCT_EXPORT_MODULE(NativeSegmentationModule)
+
++ (BOOL)requiresMainQueueSetup { return NO; }
+
+- (instancetype)init {
+  if (self = [super init]) {
+    _impl = [NativeSegmentationModule new];
+  }
+  return self;
+}
+
+RCT_EXPORT_METHOD(applyFoodOutline:(NSString *)imageUri
                   withResolver:(RCTPromiseResolveBlock)resolve
-                  withRejecter:(RCTPromiseRejectBlock)reject)
-RCT_EXTERN_METHOD(cropFood:(NSString *)imageUri
+                  withRejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl applyFoodOutline:imageUri withResolver:resolve withRejecter:reject];
+}
+
+RCT_EXPORT_METHOD(cropFood:(NSString *)imageUri
                   withResolver:(RCTPromiseResolveBlock)resolve
-                  withRejecter:(RCTPromiseRejectBlock)reject)
-RCT_EXTERN_METHOD(blurBackground:(NSString *)imageUri
+                  withRejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl cropFood:imageUri withResolver:resolve withRejecter:reject];
+}
+
+RCT_EXPORT_METHOD(blurBackground:(NSString *)imageUri
                   withResolver:(RCTPromiseResolveBlock)resolve
-                  withRejecter:(RCTPromiseRejectBlock)reject)
-RCT_EXTERN_METHOD(getContourPaths:(NSString *)imageUri
+                  withRejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl blurBackground:imageUri withResolver:resolve withRejecter:reject];
+}
+
+RCT_EXPORT_METHOD(getContourPaths:(NSString *)imageUri
                   withResolver:(RCTPromiseResolveBlock)resolve
-                  withRejecter:(RCTPromiseRejectBlock)reject)
+                  withRejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl getContourPaths:imageUri withResolver:resolve withRejecter:reject];
+}
+
 @end

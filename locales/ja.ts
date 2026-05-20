@@ -249,6 +249,8 @@ export const ja = {
       caloriesKcal: '約 {{count}} kcal',
       caloriesUnit: 'kcal',
       caloriesEditHint: 'カロリーを調整するには数字をタップ',
+      saveCard: '保存',
+      shareCard: 'シェア',
       reactionScore: {
         disliked: '{{name}} はあまり気に入らなかった。',
         liked: '{{name}} は気に入ったみたい。',

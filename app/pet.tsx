@@ -798,7 +798,7 @@ export default function PetScreen() {
             </Pressable>
           )}
           {incomingInviteCount > 0 && (
-            <Pressable style={[styles.streakPill, styles.invitePill]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.navigate('/group'); }}>
+            <Pressable style={[styles.streakPill, styles.invitePill]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.navigate({ pathname: '/group', params: { openInvites: '1' } }); }}>
               <Text style={styles.streakPillEmoji}>💌</Text>
               <Text style={styles.streakPillCount}>{incomingInviteCount}</Text>
             </Pressable>

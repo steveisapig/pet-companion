@@ -250,6 +250,8 @@ export const en = {
       caloriesKcal: '~{{count}} cal',
       caloriesUnit: 'cal',
       caloriesEditHint: 'Tap the number to adjust calories',
+      saveCard: 'Save',
+      shareCard: 'Share',
       reactionScore: {
         disliked: "{{name}} didn't like that.",
         liked: '{{name}} liked it.',

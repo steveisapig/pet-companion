@@ -16,6 +16,7 @@ import {
   ScrollView,
   TextInput,
   Dimensions,
+  Share,
 } from 'react-native';
 import type {
   PanGestureHandlerGestureEvent,
@@ -32,7 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { BlurView } from 'expo-blur';
-import { X, Check, ImagePlus, RotateCcw, RotateCw, ArrowLeft, Heart, Users, Download } from 'lucide-react-native';
+import { X, Check, ImagePlus, RotateCcw, RotateCw, ArrowLeft, Heart, Users, Download, Share2 } from 'lucide-react-native';
 import Svg, { Defs, RadialGradient as SvgRadialGradient, Stop, Circle as SvgCircle, Path as SvgPath } from 'react-native-svg';
 
 const AnimatedSvgPath = Animated.createAnimatedComponent(SvgPath);
@@ -57,6 +58,7 @@ import { recordStreakDayIfPhotoUploaded } from '@/lib/user-streak';
 import { getMyPartnership, checkAndRecordGoalHit } from '@/lib/partnerships';
 import { supabase } from '@/lib/supabase';
 import { savePhotoToDevice } from '@/lib/photo-album';
+import { composeMealCard } from '@/lib/meal-card-composer';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -533,6 +535,7 @@ export default function CameraScreen() {
   const [croppedOverlayUri, setCroppedOverlayUri] = useState<string | null>(null);
   const [savePreviewUri, setSavePreviewUri]       = useState<string | null>(null);
   const [fullScreenUri, setFullScreenUri]         = useState<string | null>(null);
+  const [isSharing, setIsSharing] = useState(false);
   const [contourResult, setContourResult]         = useState<ContourResult | null>(null);
   const contourAnimsRef = useRef<Animated.Value[]>([]);
   const getOrCreateContourAnim = (i: number): Animated.Value => {
@@ -784,7 +787,6 @@ export default function CameraScreen() {
   const trPan = useRef(makePan('tr'));
   const blPan = useRef(makePan('bl'));
   const brPan = useRef(makePan('br'));
-
   // ── rotate ────────────────────────────────────────────────────────────────────
   const doRotate = useCallback((delta: number) => {
     if (isRotating) return;
@@ -1127,6 +1129,37 @@ export default function CameraScreen() {
     }
   }, [isConfirming, addPhoto, addBadges, startSuccessAnimations, capturedUri, userId, user?.id, session, queryClient, activePartnership, locale, foodScannerEnabled]);
 
+  const buildCardUri = useCallback(async (): Promise<string | null> => {
+    if (!displayUri || !analysisResult) return null;
+    return composeMealCard({
+      foodUri: displayUri,
+      petType: petType ?? 'mochi',
+      petColor: petPrimaryColor,
+      reactionTitle: getReactionTitle(analysisResult.healthScore, petName, t),
+      reactionReason: analysisResult.reason ?? '',
+      calories: parseInt(displayCalorieStr, 10) || 0,
+      nutrients: analysisResult.nutrients,
+    });
+  }, [displayUri, analysisResult, petType, petPrimaryColor, petName, displayCalorieStr, t]);
+
+  const handleShareCard = useCallback(async () => {
+    setIsSharing(true);
+    const uri = await buildCardUri();
+    setIsSharing(false);
+    if (!uri) return;
+    await Share.share({ url: uri });
+  }, [buildCardUri]);
+
+  const handleSaveCard = useCallback(async () => {
+    setIsSharing(true);
+    const uri = await buildCardUri();
+    setIsSharing(false);
+    if (!uri) return;
+    const result = await savePhotoToDevice(uri);
+    if (result.success) Alert.alert('Saved', 'Saved to your photos.');
+    else Alert.alert('Failed', result.error ?? 'Could not save photo.');
+  }, [buildCardUri]);
+
   const handleContinue = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const photoId = uploadedPhotoIdRef.current;
@@ -1222,6 +1255,20 @@ export default function CameraScreen() {
             <Pressable style={styles.foodImageBox} onPress={() => setFullScreenUri(displayUri)}>
               <Image source={{ uri: displayUri }} style={styles.successFoodImage} resizeMode="contain" />
             </Pressable>
+          )}
+
+          {/* Share / Save card buttons */}
+          {displayUri && analysisResult && (
+            <View style={styles.shareRow}>
+              <Pressable style={styles.shareBtn} onPress={handleSaveCard} disabled={isSharing}>
+                <Download size={16} color={Colors.softOrange} />
+                <Text style={styles.shareBtnText}>{t('camera.saveCard')}</Text>
+              </Pressable>
+              <Pressable style={styles.shareBtn} onPress={handleShareCard} disabled={isSharing}>
+                <Share2 size={16} color={Colors.softOrange} />
+                <Text style={styles.shareBtnText}>{t('camera.shareCard')}</Text>
+              </Pressable>
+            </View>
           )}
 
           {/* AI disclaimer */}
@@ -2111,6 +2158,29 @@ const styles = StyleSheet.create({
   successFoodImage: {
     width: 120, height: 120, borderRadius: 10,
     borderWidth: 2.5, borderColor: '#FFFFFF',
+  },
+  shareRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 2,
+  },
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: Colors.softOrange,
+    backgroundColor: 'rgba(232,152,94,0.08)',
+  },
+  shareBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.softOrange,
   },
   healthScoreText: {
     flex: 1, fontSize: 14, fontWeight: '700', fontStyle: 'italic',

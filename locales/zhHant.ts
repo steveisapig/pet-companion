@@ -249,6 +249,8 @@ export const zhHant = {
       caloriesKcal: '約 {{count}} kcal',
       caloriesUnit: 'kcal',
       caloriesEditHint: '點擊數字可調整卡路里',
+      saveCard: '儲存',
+      shareCard: '分享',
       reactionScore: {
         disliked: '{{name}} 不太喜歡這個。',
         liked: '{{name}} 還挺喜歡的。',

@@ -249,6 +249,8 @@ export const zhHans = {
       caloriesKcal: '约 {{count}} kcal',
       caloriesUnit: 'kcal',
       caloriesEditHint: '点击数字可调整卡路里',
+      saveCard: '保存',
+      shareCard: '分享',
       reactionScore: {
         disliked: '{{name}} 不太喜欢这个。',
         liked: '{{name}} 还挺喜欢的。',

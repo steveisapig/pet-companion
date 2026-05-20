@@ -15,9 +15,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 // useFocusEffect is used to refetch on screen focus
 import { ArrowLeft, Users, Target, Zap, Check, Trash2, X, Clock } from 'lucide-react-native';
+import { PanGestureHandler, State as GestureState, ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -43,6 +44,7 @@ import {
 } from '@/lib/partnerships';
 import type { PetType } from '@/constants/pets';
 import { getPartnershipPhotos, type PetPhoto } from '@/lib/supabase-photos';
+import { loadPartnerOrder, savePartnerOrder } from '@/lib/partner-order-storage';
 import { ITEM_TYPE_EMOJI } from '@/constants/badge-types';
 import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 
@@ -188,6 +190,165 @@ function groupByLocalDay(photos: PetPhoto[]): Map<string, PetPhoto[]> {
   return map;
 }
 
+// ─── Draggable partner row ────────────────────────────────────────────────────
+
+const SLOT_WIDTH = 83 + 12; // partnerCircleWrap.width + row gap
+
+interface DraggableRowProps {
+  partnerships: ActivePartnership[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onReorder: (ids: string[]) => void;
+  onAddPartner: () => void;
+  canAddMore: boolean;
+}
+
+function DraggablePartnerRow({ partnerships, selectedId, onSelect, onReorder, onAddPartner, canAddMore }: DraggableRowProps) {
+  // Always-current refs so closures never go stale
+  const psRef = useRef(partnerships);
+  psRef.current = partnerships;
+  const onReorderRef = useRef(onReorder);
+  onReorderRef.current = onReorder;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  // Which partnership ID is currently being dragged (drives zIndex)
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const setDraggingIdRef = useRef(setDraggingId);
+  setDraggingIdRef.current = setDraggingId;
+
+  const animRef = useRef(new Map<string, { x: Animated.Value }>());
+  partnerships.forEach(p => {
+    if (!animRef.current.has(p.id))
+      animRef.current.set(p.id, { x: new Animated.Value(0) });
+  });
+
+  const handlersRef = useRef(new Map<string, { onGestureEvent: any; onHandlerStateChange: any }>());
+  const stateCallbacksRef = useRef(new Map<string, (state: number) => void>());
+  const dragRef = useRef({ active: false, fromIdx: -1, toIdx: -1 });
+
+  partnerships.forEach(p => {
+    const pid = p.id;
+    const anim = animRef.current.get(pid)!;
+
+    stateCallbacksRef.current.set(pid, (state: number) => {
+      if (state === GestureState.ACTIVE) {
+        const currentIdx = psRef.current.findIndex(q => q.id === pid);
+        dragRef.current = { active: true, fromIdx: currentIdx, toIdx: currentIdx };
+        setDraggingIdRef.current(pid);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } else if (state === GestureState.END || state === GestureState.CANCELLED || state === GestureState.FAILED) {
+        if (!dragRef.current.active) return;
+        const { fromIdx, toIdx } = dragRef.current;
+        dragRef.current = { active: false, fromIdx: -1, toIdx: -1 };
+        setDraggingIdRef.current(null);
+
+        const reordering = state === GestureState.END && fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx;
+
+        if (reordering) {
+          psRef.current.forEach(other => {
+            const oa = animRef.current.get(other.id);
+            if (!oa) return;
+            oa.x.stopAnimation();
+            oa.x.setValue(0);
+          });
+          const newIds = psRef.current.map(q => q.id);
+          const [moved] = newIds.splice(fromIdx, 1);
+          newIds.splice(toIdx, 0, moved);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onReorderRef.current(newIds);
+        } else {
+          psRef.current.forEach(other => {
+            const oa = animRef.current.get(other.id);
+            if (!oa) return;
+            Animated.spring(oa.x, { toValue: 0, useNativeDriver: true, friction: 8 }).start();
+          });
+        }
+      }
+    });
+
+    if (handlersRef.current.has(pid)) return;
+    handlersRef.current.set(pid, {
+      onGestureEvent: ({ nativeEvent: { translationX } }: any) => {
+        if (!dragRef.current.active) return;
+        const { fromIdx } = dragRef.current;
+        const count = psRef.current.length;
+        anim.x.setValue(translationX);
+        const newTarget = Math.max(0, Math.min(count - 1, Math.round(fromIdx + translationX / SLOT_WIDTH)));
+        if (newTarget === dragRef.current.toIdx) return;
+        dragRef.current.toIdx = newTarget;
+        psRef.current.forEach((other, i) => {
+          if (i === fromIdx) return;
+          const oa = animRef.current.get(other.id);
+          if (!oa) return;
+          let target = 0;
+          if (newTarget > fromIdx && i > fromIdx && i <= newTarget) target = -SLOT_WIDTH;
+          else if (newTarget < fromIdx && i >= newTarget && i < fromIdx) target = SLOT_WIDTH;
+          Animated.spring(oa.x, { toValue: target, useNativeDriver: true, overshootClamping: true, friction: 12, tension: 150 }).start();
+        });
+      },
+      onHandlerStateChange: ({ nativeEvent: { state } }: any) => {
+        stateCallbacksRef.current.get(pid)?.(state);
+      },
+    });
+  });
+
+  return (
+    // Wrapper elevates the entire row above page content while any circle is dragged
+    <View style={[styles.partnerRowScroll, draggingId ? { zIndex: 999 } : undefined]}>
+      <GHScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.partnerRowContent}
+      >
+        {partnerships.map(p => {
+          const anim = animRef.current.get(p.id)!;
+          const h = handlersRef.current.get(p.id)!;
+          const isSelected = p.id === selectedId;
+          const isDragging = p.id === draggingId;
+          return (
+            // This View is the actual flex-row sibling — zIndex here beats other wrappers
+            <View key={p.id} style={isDragging ? { zIndex: 999, elevation: 8 } : undefined}>
+              <PanGestureHandler
+                onGestureEvent={h.onGestureEvent}
+                onHandlerStateChange={h.onHandlerStateChange}
+                activateAfterLongPress={500}
+                minDist={5}
+              >
+                <Animated.View style={[
+                  styles.partnerCircleWrap,
+                  { transform: [{ translateX: anim.x }] },
+                ]}>
+                  <Pressable
+                    onPress={() => { onSelectRef.current(p.id); Haptics.selectionAsync(); }}
+                    style={{ alignItems: 'center' }}
+                  >
+                    <View style={[styles.partnerCirclePortrait, isSelected && styles.partnerCircleSelected]}>
+                      <PetPortrait petType={p.partner.petType} mood="happy" primaryColor={null} style={styles.partnerCircleImg} />
+                    </View>
+                    <Text style={styles.partnerCircleName} numberOfLines={1}>{p.partner.petName ?? '?'}</Text>
+                    {p.partner.username ? (
+                      <Text style={styles.partnerCircleSub} numberOfLines={1}>@{p.partner.username}</Text>
+                    ) : null}
+                  </Pressable>
+                </Animated.View>
+              </PanGestureHandler>
+            </View>
+        );
+      })}
+      {canAddMore && (
+        <Pressable style={styles.partnerCircleWrap} onPress={onAddPartner}>
+          <View style={styles.partnerCircleAdd}>
+            <Text style={styles.partnerCircleAddText}>+</Text>
+          </View>
+          <Text style={styles.partnerCircleName}>Add</Text>
+        </Pressable>
+      )}
+      </GHScrollView>
+    </View>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function GroupScreen() {
@@ -195,6 +356,7 @@ export default function GroupScreen() {
   const { t } = useAppTranslation();
   const { petName, petType, petPrimaryColor, userId, username } = usePet();
   const goalOptions = useMemo(() => getGoalOptions(t), [t]);
+  const { openInvites } = useLocalSearchParams<{ openInvites?: string }>();
 
   const queryClient = useQueryClient();
 
@@ -253,11 +415,31 @@ export default function GroupScreen() {
   });
 
   const [selectedPartnershipId, setSelectedPartnershipId] = useState<string | null>(null);
+  const [partnerOrder, setPartnerOrder] = useState<string[]>([]);
+
+  useEffect(() => { loadPartnerOrder().then(setPartnerOrder); }, []);
+
+  // When deep-linked with openInvites=1, jump to add-partner once data is ready
+  const openInvitesHandled = useRef(false);
+  useEffect(() => {
+    if (!openInvites || openInvitesHandled.current || partnershipLoading) return;
+    openInvitesHandled.current = true;
+    if (activePartnerships.length > 0) {
+      setLocalScreen('add-partner');
+    }
+    // If no active partnerships, the 'none' screen already shows the inbox — no action needed.
+  }, [openInvites, partnershipLoading, activePartnerships.length]);
+
+  const orderedPartnerships = useMemo(() => {
+    if (!partnerOrder.length) return activePartnerships;
+    const rank = new Map(partnerOrder.map((id, i) => [id, i]));
+    return [...activePartnerships].sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999));
+  }, [activePartnerships, partnerOrder]);
 
   // The currently displayed partnership (selected or first).
   const activePartnership = useMemo(
-    () => activePartnerships.find((p) => p.id === selectedPartnershipId) ?? activePartnerships[0] ?? null,
-    [activePartnerships, selectedPartnershipId],
+    () => orderedPartnerships.find((p) => p.id === selectedPartnershipId) ?? orderedPartnerships[0] ?? null,
+    [orderedPartnerships, selectedPartnershipId],
   );
 
   // Pending invites — always fetched so they're visible in the add-partner flow.
@@ -832,7 +1014,7 @@ export default function GroupScreen() {
                     style={styles.partnerRowScroll}
                     contentContainerStyle={styles.partnerRowContent}
                   >
-                    {activePartnerships.map((p) => (
+                    {orderedPartnerships.map((p) => (
                       <Pressable
                         key={p.id}
                         style={styles.partnerCircleWrap}
@@ -1130,43 +1312,24 @@ export default function GroupScreen() {
           {screen === 'active' && activePartnership && goalOption && (() => {
             const partner = activePartnership.partner;
             const partnerName = partner.petName ?? t('group.active.partnerLabel');
-            const selectedId = selectedPartnershipId ?? activePartnerships[0]?.id ?? null;
+            const selectedId = selectedPartnershipId ?? orderedPartnerships[0]?.id ?? null;
             return (
               <>
-                {/* Partner selector row — circles for each partner + Add button */}
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.partnerRowScroll}
-                  contentContainerStyle={styles.partnerRowContent}
-                >
-                  {activePartnerships.map((p) => (
-                    <Pressable
-                      key={p.id}
-                      style={styles.partnerCircleWrap}
-                      onPress={() => { setSelectedPartnershipId(p.id); Haptics.selectionAsync(); }}
-                    >
-                      <View style={[styles.partnerCirclePortrait, p.id === selectedId && styles.partnerCircleSelected]}>
-                        <PetPortrait petType={p.partner.petType} mood="happy" primaryColor={null} style={styles.partnerCircleImg} />
-                      </View>
-                      <Text style={styles.partnerCircleName} numberOfLines={1}>{p.partner.petName ?? '?'}</Text>
-                      {p.partner.username ? (
-                        <Text style={styles.partnerCircleSub} numberOfLines={1}>@{p.partner.username}</Text>
-                      ) : null}
-                    </Pressable>
-                  ))}
-                  {activePartnerships.length < MAX_PARTNERS && (
-                    <Pressable
-                      style={styles.partnerCircleWrap}
-                      onPress={() => { setLocalScreen('add-partner'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                    >
-                      <View style={styles.partnerCircleAdd}>
-                        <Text style={styles.partnerCircleAddText}>+</Text>
-                      </View>
-                      <Text style={styles.partnerCircleName}>Add</Text>
-                    </Pressable>
-                  )}
-                </ScrollView>
+                {/* Partner selector row — draggable circles + Add button */}
+                <DraggablePartnerRow
+                  partnerships={orderedPartnerships}
+                  selectedId={selectedId}
+                  onSelect={(id) => setSelectedPartnershipId(id)}
+                  onReorder={(ids) => {
+                    // Pin the currently displayed partnership so the page doesn't change
+                    const pinned = selectedPartnershipId ?? orderedPartnerships[0]?.id ?? null;
+                    if (pinned) setSelectedPartnershipId(pinned);
+                    setPartnerOrder(ids);
+                    savePartnerOrder(ids);
+                  }}
+                  onAddPartner={() => { setLocalScreen('add-partner'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  canAddMore={activePartnerships.length < MAX_PARTNERS}
+                />
 
                 <View style={styles.petsRow}>
                   <View style={styles.petSlot}>

@@ -1,11 +1,27 @@
 #import <React/RCTBridgeModule.h>
 #import "Marumimi-Swift.h"
 
-@interface NativeCameraModule (RCTExternModule) <RCTBridgeModule>
+@interface NativeCameraModuleExport : NSObject <RCTBridgeModule>
 @end
 
-@implementation NativeCameraModule (RCTExternModule)
-RCT_EXPORT_MODULE()
-RCT_EXTERN_METHOD(launchCamera:(RCTPromiseResolveBlock)resolve
-                  withRejecter:(RCTPromiseRejectBlock)reject)
+@implementation NativeCameraModuleExport {
+  NativeCameraModule *_impl;
+}
+
+RCT_EXPORT_MODULE(NativeCameraModule)
+
++ (BOOL)requiresMainQueueSetup { return NO; }
+
+- (instancetype)init {
+  if (self = [super init]) {
+    _impl = [NativeCameraModule new];
+  }
+  return self;
+}
+
+RCT_EXPORT_METHOD(launchCamera:(RCTPromiseResolveBlock)resolve
+                  withRejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl launchCamera:resolve withRejecter:reject];
+}
+
 @end

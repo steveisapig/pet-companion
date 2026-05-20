@@ -21,10 +21,12 @@ struct CropImageView: View {
             .foregroundColor(.white)
             .padding()
           Spacer()
-          Button("Done") { onDone(renderCropped()) }
-            .foregroundColor(Color(red: 1, green: 0.8, blue: 0))
-            .bold()
-            .padding()
+          Button(action: { onDone(renderCropped()) }) {
+            Text("Done")
+              .fontWeight(.bold)
+              .foregroundColor(Color(red: 1, green: 0.8, blue: 0))
+          }
+          .padding()
         }
 
         // ── image canvas ─────────────────────────────────────────

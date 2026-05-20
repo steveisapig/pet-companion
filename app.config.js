@@ -31,7 +31,7 @@ const ANDROID_PACKAGE = IS_DEV
 
 // Visible in EAS build logs ("Read app config") — verify production builds are not using .dev
 console.log(
-  `[app.config] ios.bundleIdentifier=${IOS_BUNDLE_ID} IS_DEV=${IS_DEV} IS_DEV_env=${process.env.IS_DEV ?? '(unset)'} NODE_ENV=${process.env.NODE_ENV ?? '(unset)'}`
+  `[app.config] ios.bundleIdentifier=${IOS_BUNDLE_ID} IS_DEV=${IS_DEV} NODE_ENV=${process.env.NODE_ENV ?? '(unset)'}`
 );
 
 function deriveSchemeFromClientId(clientId) {

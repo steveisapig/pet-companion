@@ -4,9 +4,10 @@ const FOOD_SCANNER_KEY = '@pet_companion/food_scanner_enabled';
 
 export async function getFoodScannerEnabled(): Promise<boolean> {
   try {
-    return (await AsyncStorage.getItem(FOOD_SCANNER_KEY)) === '1';
+    const val = await AsyncStorage.getItem(FOOD_SCANNER_KEY);
+    return val === null ? true : val === '1';
   } catch {
-    return false;
+    return true;
   }
 }
 
